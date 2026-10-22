@@ -200,6 +200,10 @@ class ImageSegmentationRFDETR(SegmentationTrainingData, Task):
             int | None,
             Arg(help="Maximum total images across training and validation, after exclusions, in input order. Omit for all images. Ignored when reusing an existing export."),
         ] = None,
+        eval_masks_head_resolution: Annotated[
+            bool,
+            Arg(help="Score validation (and train/mask_iou) at the mask head's resolution instead of upsampling every prediction to the full image. Avoids GPU out-of-memory on large pages; changes only these metrics and best-epoch selection, not training or the saved model's inference."),
+        ] = False,
     ) -> Path:
         """Fine-tune RF-DETR on mask annotations and adopt its best weights."""
         if min(epochs, batch, num_gpus) < 1:
@@ -252,7 +256,7 @@ class ImageSegmentationRFDETR(SegmentationTrainingData, Task):
                 "grad_accum_steps": 1, "device": self.device,
                 "wandb": wandb, "project": f"{self.pipeline.name}-{self.name}",
                 "run": output.name, "use_ema": False, "run_test": False,
-                "eval_interval": 1,
+                "eval_interval": 1, "eval_masks_head_resolution": eval_masks_head_resolution,
             },
         }
         config_path = output / "rfdetr-training.json"

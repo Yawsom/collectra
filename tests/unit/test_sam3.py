@@ -594,6 +594,19 @@ def test_validation_configuration_installs_iou_and_reporting(image, tmp_path, sa
         "_target_": "collectra.tasks.image_segmentation.sam3_metrics.MaskIoU",
         "confidence_threshold": 0.7,
     }
+    # Training images are rescored like validation for train/mask_iou.
+    train_eval = trainer["collectra_train_eval"]
+    assert train_eval["dataset"]["img_folder"] == str(dataset / "train")
+    assert train_eval["dataset"]["ann_file"] == str(dataset / "train/_annotations.coco.json")
+    # Otherwise identical to validation (transforms, loader, collate function).
+    paths = ("img_folder", "ann_file")
+    assert {k: v for k, v in train_eval["dataset"].items() if k not in paths} == {
+        k: v for k, v in trainer["data"]["val"]["dataset"].items() if k not in paths
+    }
+    assert {k: v for k, v in train_eval.items() if k != "dataset"} == {
+        k: v for k, v in trainer["data"]["val"].items() if k != "dataset"
+    }
+    assert trainer["collectra_mask_threshold"] == 0.7
 
 
 @pytest.mark.parametrize("explicit_output", [True, False])

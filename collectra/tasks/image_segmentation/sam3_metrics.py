@@ -157,13 +157,21 @@ class TrainingHooks:
         collectra_wandb=False,
         collectra_run_name=None,
         collectra_project=None,
+        collectra_train_eval=None,
+        collectra_mask_threshold=0.5,
         **kwargs,
     ):
         self._collectra_best = None
         self._collectra_output = Path(collectra_output)
         self._collectra_has_validation = bool(kwargs["data"].get("val"))
         self._collectra_reporter = None
+        self._collectra_mask_threshold = collectra_mask_threshold
         super().__init__(**kwargs)
+        self._collectra_train_eval = None
+        if collectra_train_eval:
+            from hydra.utils import instantiate
+
+            self._collectra_train_eval = instantiate(collectra_train_eval)
         if self.distributed_rank == 0:
             self._collectra_reporter = EpochReporter(
                 collectra_output,
@@ -236,7 +244,41 @@ class TrainingHooks:
             self._save_best(float(loss), "train/loss", maximize=False)
         if self._collectra_reporter is not None:
             self._collectra_reporter.record(self.epoch + 1, "train", metrics)
+        if not self._collectra_has_validation:
+            self._collectra_record_train_iou()
         return metrics
+
+    def _collectra_record_train_iou(self):
+        """Score the training images like validation and report train/mask_iou."""
+        if self._collectra_train_eval is None:
+            return
+        import time
+
+        import torch
+        from sam3.model.utils.misc import copy_data_to_device
+        from sam3.train.utils.train_utils import get_amp_type
+
+        started = time.monotonic()
+        meter = MaskIoU(self._collectra_mask_threshold)
+        amp = self.optim_conf.amp if self.optim_conf else None
+        self.model.eval()
+        loader = self._collectra_train_eval.get_loader(epoch=int(self.epoch))
+        with torch.no_grad(), torch.amp.autocast(
+            device_type="cuda",
+            enabled=bool(amp and amp.enabled),
+            dtype=get_amp_type(amp.amp_dtype) if amp else None,
+        ):
+            for batch in loader:
+                _, batch = batch.popitem()
+                batch = copy_data_to_device(batch, self.device, non_blocking=True)
+                meter.update(find_stages=self.model(batch), batch=batch)
+        score = meter.compute_synced()["iou"]
+        logging.info(
+            "Train mask IoU (eval pass): epoch=%s, iou=%s, %.0fs",
+            self.epoch + 1, score, time.monotonic() - started,
+        )
+        if self._collectra_reporter is not None:
+            self._collectra_reporter.record(self.epoch + 1, "train", {"mask_iou": score})
 
     def val_epoch(self, val_loader, phase):
         metrics = super().val_epoch(val_loader, phase)
@@ -254,6 +296,7 @@ class TrainingHooks:
         self._save_best(metrics["mask_iou"], "val/mask_iou", maximize=True)
         if self._collectra_reporter is not None:
             self._collectra_reporter.record(self.epoch + 1, "val", metrics)
+        self._collectra_record_train_iou()
         return metrics
 
     def run(self):
