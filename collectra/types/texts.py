@@ -42,6 +42,9 @@ class Text(Artefact):
         super().__post_init__()
         if self.path is not None and self.data is not None:
             raise ValueError("Text accepts either data or path, not both")
+        # YAML reads ``book: 1`` as a number, but a Text always holds text.
+        if isinstance(self.data, (bool, int, float)):
+            self.data = str(self.data)
         # Continue accepting legacy file references in data.
         if self.path is None and self.data:
             try:

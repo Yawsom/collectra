@@ -52,3 +52,20 @@ def test_display_resolves_explicit_path(tmp_path):
     item = context.artefact("note")
     assert item.display(context)["text"] == "# Hello"
     assert item.display(context)["format"] == "markdown"
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [(1, "1"), (13, "13"), (0, "0"), (1.5, "1.5"), (True, "True")],
+)
+def test_numbers_and_flags_from_yaml_become_text(value, expected):
+    """``book: 1`` in a results.yaml is an int to YAML but text to Collectra."""
+    text = Text(name="book", data=value)
+    assert text.data == expected
+    assert text() == expected
+    assert text.serialize()["data"] == expected
+
+
+def test_numeric_text_loads_the_way_the_results_loader_builds_it():
+    item = {"id": "book", "data": 1}
+    assert Text(name="book", **item)() == "1"

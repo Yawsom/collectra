@@ -193,8 +193,42 @@ def test_a_requested_task_that_lacks_inputs_says_which(tmp_path, done, caplog):
     )
     assert "did not run" in message
     assert "a.stg" in message
-    assert "extra" in message
-    assert "described" not in message.split("missing")[-1]
+    # Each missing input is on its own coloured line; inputs with data are not listed.
+    assert "\n  • [bold red]extra[/bold red]" in message
+    assert "described" not in message.split("Missing")[-1]
+    assert "only runs once all of its inputs exist" in message
+
+
+def test_long_lists_of_missing_inputs_are_shortened(tmp_path, done, caplog):
+    pipeline = build(tmp_path, batch_size=1)
+    names = [f"missing_{n:02d}" for n in range(14)]
+    pipeline.data["joiner_many"] = {
+        "type": "tests.unit.test_pipeline_skip.Joiner",
+        "input": ["described", *names],
+        "output": ["joined"],
+    }
+    with caplog.at_level("WARNING", logger="collectra"):
+        pipeline.run("joiner_many", single=True, files=done[:1])
+    message = next(
+        r.getMessage() for r in caplog.records if "did not run" in r.getMessage()
+    )
+    assert message.count("•") == 10
+    assert "and 4 more" in message
+
+
+def test_names_that_look_like_markup_are_shown_literally(tmp_path, done, caplog):
+    pipeline = build(tmp_path, batch_size=1)
+    pipeline.data["joiner_odd"] = {
+        "type": "tests.unit.test_pipeline_skip.Joiner",
+        "input": ["described", "[red]odd"],
+        "output": ["joined"],
+    }
+    with caplog.at_level("WARNING", logger="collectra"):
+        pipeline.run("joiner_odd", single=True, files=done[:1])
+    message = next(
+        r.getMessage() for r in caplog.records if "did not run" in r.getMessage()
+    )
+    assert "\\[red]odd" in message
 
 
 def test_tasks_reached_before_their_other_inputs_are_ready_stay_quiet(

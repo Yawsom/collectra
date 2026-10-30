@@ -123,6 +123,9 @@ class Artefact(BaseEntity):
 
     def __post_init__(self) -> None:
         super().__init__(self.name)  # Initialize BaseEntity
+        # An automatic id is provisional: the pipeline renames it after the
+        # node (``node`` or ``node-k``) when the artefact joins its node.
+        self._auto_id = not self.id
         if not self.id:
             self.id = self._generate_id()
 
@@ -131,6 +134,7 @@ class Artefact(BaseEntity):
         attributes.add("name")
         attributes.add("partition")
         attributes.add("source_file")
+        attributes.add("_auto_id")
         return attributes
 
     @classmethod

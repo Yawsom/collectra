@@ -34,6 +34,7 @@ from cappa import Arg
 import graphviz
 import networkx as nx
 import yaml
+from rich.markup import escape
 from rich.progress import track
 
 from collectra.utils import change_dir, load_class_from_string, write_yaml
@@ -661,15 +662,17 @@ class Collectra:
                 for parent in self.node_manager.get_parents_artefact(node)
                 if parent.status != NodeStatus.READY
             ]
-            shown = ", ".join(missing[:5]) + (
-                f" and {len(missing) - 5} more" if len(missing) > 5 else ""
-            )
+            lines = [
+                f"  • [bold red]{escape(name)}[/bold red]" for name in missing[:10]
+            ]
+            if len(missing) > 10:
+                lines.append(f"  … and {len(missing) - 10} more")
             logger.warning(
-                "Task '%s' did not run for %s: missing input data for: %s. "
-                "A task only runs once all of its inputs exist.",
+                "Task '%s' did not run for %s. "
+                "A task only runs once all of its inputs exist.\nMissing input data:\n%s",
                 node.name,
                 Path(str(value)).name,
-                shown or "its inputs",
+                "\n".join(lines) or "  • its inputs",
             )
 
     def _create_collectra_file(
@@ -1087,6 +1090,7 @@ class Collectra:
                 and node.check_type(type(arg))
             ):
                 self._check_existing(node, arg)
+        self._name_new_items(node, args)
 
         # Mark as READY even if no items matched — parent task has completed
         if node.status == NodeStatus.NOT_READY:
@@ -1151,6 +1155,51 @@ class Collectra:
         ]
         return ready_tasks
 
+    def _name_new_items(self, node: ArtefactNode, results: tuple) -> None:
+        """Give automatically identified items in ``node`` their final ids.
+
+        A lone item takes the node's name; otherwise items are numbered
+        ``node-1``, ``node-2``... skipping ids already in use. Ids that were
+        loaded or chosen explicitly never change, so existing references hold.
+        ``results`` is everything the task produced, so references to a renamed
+        item from its siblings are updated too.
+        """
+        fresh = [
+            item for item in node.items.values() if getattr(item, "_auto_id", False)
+        ]
+        if not fresh:
+            return
+        fresh_objects = {id(item) for item in fresh}
+        taken = {
+            item.id for item in node.items.values() if id(item) not in fresh_objects
+        }
+        renamed: dict[str, str] = {}
+        number = 1
+        for item in fresh:
+            if len(node.items) == 1:
+                new_id = node.name
+            else:
+                while f"{node.name}-{number}" in taken:
+                    number += 1
+                new_id = f"{node.name}-{number}"
+            taken.add(new_id)
+            renamed[item.id] = new_id
+        for result in results:
+            if not isinstance(result, Artefact):
+                continue
+            if isinstance(result.parents, str):
+                result.parents = renamed.get(result.parents, result.parents)
+            else:
+                result.parents = [
+                    renamed.get(parent, parent) for parent in result.parents
+                ]
+        ordered = list(node.items.values())
+        for item in fresh:
+            item.id = renamed[item.id]
+            item._auto_id = False
+        node.items.clear()
+        node.items.update({item.id: item for item in ordered})
+
     def _check_existing(self, node: ArtefactNode, new_item: Artefact) -> None:
         """Check if an identical item already exists in the artefact node.
 
@@ -1165,6 +1214,8 @@ class Collectra:
         for existing_id, existing_item in items.items():
             if self._is_identical_item(existing_item, new_item):
                 new_item.id = existing_item.id
+                # Still provisional if the replaced item had not been named yet.
+                new_item._auto_id = getattr(existing_item, "_auto_id", False)
                 items[existing_id] = new_item
                 return
 
