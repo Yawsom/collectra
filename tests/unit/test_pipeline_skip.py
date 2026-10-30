@@ -7,6 +7,7 @@ import yaml
 
 from collectra import Collectra
 from collectra.cli import invoke
+from collectra.tasks.base import Task
 from collectra.types.images import Image
 from collectra.types.texts import Text
 from tests.unit.test_pipeline_stages import (  # noqa: F401  (files is a fixture)
@@ -165,3 +166,46 @@ def test_forcing_does_not_print_skip_messages(tmp_path, done, caplog):
     with caplog.at_level("WARNING", logger="collectra"):
         build(tmp_path, batch_size=1).run(files=done[:1], force=True)
     assert not [r for r in caplog.records if "--force" in r.getMessage()]
+
+
+class Joiner(Task):
+    """Needs two inputs; only ``described`` ever has data in these folders."""
+
+    def run(self, described: Text, extra: Text) -> Text:
+        EVENTS.append("join")
+        return Text(name=self.get_output_name(), data="joined")
+
+
+def test_a_requested_task_that_lacks_inputs_says_which(tmp_path, done, caplog):
+    from tests.unit.test_pipeline_stages import MODULE
+
+    pipeline = build(tmp_path, batch_size=1)
+    pipeline.data["joiner"] = {
+        "type": "tests.unit.test_pipeline_skip.Joiner",
+        "input": ["described", "extra"],
+        "output": ["joined"],
+    }
+    with caplog.at_level("WARNING", logger="collectra"):
+        pipeline.run("joiner", single=True, files=done[:1])
+    assert EVENTS == []
+    message = next(
+        r.getMessage() for r in caplog.records if "'joiner'" in r.getMessage()
+    )
+    assert "did not run" in message
+    assert "a.stg" in message
+    assert "extra" in message
+    assert "described" not in message.split("missing")[-1]
+
+
+def test_tasks_reached_before_their_other_inputs_are_ready_stay_quiet(
+    tmp_path, files, caplog
+):
+    pipeline = build(tmp_path, batch_size=1)
+    pipeline.data["joiner"] = {
+        "type": "tests.unit.test_pipeline_skip.Joiner",
+        "input": ["described", "extra"],
+        "output": ["joined"],
+    }
+    with caplog.at_level("WARNING", logger="collectra"):
+        pipeline.run(files=files[:1])
+    assert not [r for r in caplog.records if "did not run" in r.getMessage()]

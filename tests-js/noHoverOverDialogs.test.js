@@ -51,3 +51,20 @@ describe('hover cards in the DAG tabs of split panels', () => {
         for (const card of [...Object.values(byId), ...splitPanelCards]) expect(card.style.display).toBe('none');
     });
 });
+
+
+describe('folder right-click menu', () => {
+    const menu = () => between('function showFolderContextMenu(', 'function getDagColors(');
+
+    it('offers Copy Path beside Reveal in Finder', () => {
+        const source = menu();
+        expect(source).toContain('data-action="reveal">Reveal in Finder');
+        expect(source).toContain('data-action="copy-path">Copy Path');
+    });
+
+    it('copies the specimen folder path through the Python bridge', () => {
+        const source = menu();
+        expect(source).toContain('copy_to_clipboard(');
+        expect(source).toMatch(/folder\.yaml_path[^;]*replace\(/);
+    });
+});

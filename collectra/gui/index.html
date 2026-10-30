@@ -4420,7 +4420,19 @@
             menu.style.left = mouseEvent.clientX + 'px';
             menu.style.top = mouseEvent.clientY + 'px';
             menu.innerHTML =
-                '<div class="node-context-menu-item" data-action="reveal">Reveal in Finder</div>';
+                '<div class="node-context-menu-item" data-action="reveal">Reveal in Finder</div>' +
+                '<div class="node-context-menu-item" data-action="copy-path">Copy Path</div>';
+            menu.querySelector('[data-action="copy-path"]').addEventListener('click', async () => {
+                closeNodeContextMenu();
+                // The specimen folder holding results.yaml, ready to pass to `run`.
+                const folderPath = folder.yaml_path.replace(/[\\/][^\\/]*$/, '');
+                try {
+                    const result = await window.pywebview.api.copy_to_clipboard(folderPath);
+                    if (!result.success) console.error('Failed to copy path:', result.error);
+                } catch (e) {
+                    console.error('Error copying path:', e);
+                }
+            });
             menu.querySelector('[data-action="reveal"]').addEventListener('click', async () => {
                 closeNodeContextMenu();
                 try {

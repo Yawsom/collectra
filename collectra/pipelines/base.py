@@ -645,6 +645,32 @@ class Collectra:
             force=options["force"],
             task_overrides=options["task_overrides"],
         )
+        self._warn_unready_starting_tasks(starting_nodes, value)
+
+    def _warn_unready_starting_tasks(self, starting_nodes: list[TaskNode], value):
+        """Explain why a task the user asked for never ran for this file.
+
+        Tasks reached part-way through the DAG may legitimately wait for their
+        other inputs, so only the tasks the run started from are reported.
+        """
+        for node in starting_nodes:
+            if node.status == NodeStatus.READY:
+                continue
+            missing = [
+                parent.name
+                for parent in self.node_manager.get_parents_artefact(node)
+                if parent.status != NodeStatus.READY
+            ]
+            shown = ", ".join(missing[:5]) + (
+                f" and {len(missing) - 5} more" if len(missing) > 5 else ""
+            )
+            logger.warning(
+                "Task '%s' did not run for %s: missing input data for: %s. "
+                "A task only runs once all of its inputs exist.",
+                node.name,
+                Path(str(value)).name,
+                shown or "its inputs",
+            )
 
     def _create_collectra_file(
         self, key: str, value: str | Path, output_dir: str | Path | None = None

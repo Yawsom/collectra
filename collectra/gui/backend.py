@@ -392,6 +392,38 @@ class GUIBackend:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def copy_to_clipboard(self, text: str) -> dict:
+        """Copy text to the system clipboard (used by the 'Copy Path' menu item).
+
+        The webview's own clipboard API is unavailable outside secure contexts,
+        so use the operating system's clipboard tool instead.
+
+        Returns:
+            dict with 'success' or 'error'
+        """
+        import subprocess
+
+        system = platform.system()
+        if system == "Darwin":
+            commands = [["pbcopy"]]
+        elif system == "Windows":
+            commands = [["clip"]]
+        else:
+            commands = [["xclip", "-selection", "clipboard"], ["wl-copy"]]
+
+        for command in commands:
+            try:
+                subprocess.run(command, input=text, text=True, check=True)
+                return {"success": True}
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": f"No clipboard tool found ({' or '.join(c[0] for c in commands)})",
+        }
+
     def _scan_collectra_folder(self, folder_path: Path) -> dict | None:
         """
         Scan a folder for YAML and image files.

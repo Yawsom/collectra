@@ -1125,6 +1125,91 @@ class TestApiRevealInFolder:
         mock_run.assert_called_once_with(["xdg-open", str(yaml_path.parent)])
 
 
+class TestApiCopyToClipboard:
+    """Tests for GUIBackend.copy_to_clipboard (used by the 'Copy Path' menu item)."""
+
+    def test_pipes_the_text_to_pbcopy_on_macos(self, backend_with_extension):
+        with (
+            patch("platform.system", return_value="Darwin"),
+            patch("subprocess.run") as mock_run,
+        ):
+            result = backend_with_extension.copy_to_clipboard("/data/Page022.livy")
+
+        assert result == {"success": True}
+        mock_run.assert_called_once_with(
+            ["pbcopy"], input="/data/Page022.livy", text=True, check=True
+        )
+
+    def test_pipes_the_text_to_clip_on_windows(self, backend_with_extension):
+        with (
+            patch("platform.system", return_value="Windows"),
+            patch("subprocess.run") as mock_run,
+        ):
+            result = backend_with_extension.copy_to_clipboard("C:\\data\\Page022.livy")
+
+        assert result["success"] is True
+        mock_run.assert_called_once_with(
+            ["clip"], input="C:\\data\\Page022.livy", text=True, check=True
+        )
+
+    def test_uses_xclip_on_linux(self, backend_with_extension):
+        with (
+            patch("platform.system", return_value="Linux"),
+            patch("subprocess.run") as mock_run,
+        ):
+            result = backend_with_extension.copy_to_clipboard("/data/Page022.livy")
+
+        assert result["success"] is True
+        mock_run.assert_called_once_with(
+            ["xclip", "-selection", "clipboard"],
+            input="/data/Page022.livy",
+            text=True,
+            check=True,
+        )
+
+    def test_falls_back_to_wl_copy_on_linux_without_xclip(self, backend_with_extension):
+        def run(command, **kwargs):
+            if command[0] == "xclip":
+                raise FileNotFoundError(command[0])
+
+        with (
+            patch("platform.system", return_value="Linux"),
+            patch("subprocess.run", side_effect=run) as mock_run,
+        ):
+            result = backend_with_extension.copy_to_clipboard("/data/x")
+
+        assert result["success"] is True
+        assert [call.args[0][0] for call in mock_run.call_args_list] == [
+            "xclip",
+            "wl-copy",
+        ]
+
+    def test_reports_a_missing_clipboard_tool(self, backend_with_extension):
+        with (
+            patch("platform.system", return_value="Linux"),
+            patch("subprocess.run", side_effect=FileNotFoundError("none")),
+        ):
+            result = backend_with_extension.copy_to_clipboard("/data/x")
+
+        assert result["success"] is False
+        assert "clipboard" in result["error"].lower()
+
+    def test_reports_a_failing_clipboard_command(self, backend_with_extension):
+        import subprocess
+
+        with (
+            patch("platform.system", return_value="Darwin"),
+            patch(
+                "subprocess.run",
+                side_effect=subprocess.CalledProcessError(1, "pbcopy"),
+            ),
+        ):
+            result = backend_with_extension.copy_to_clipboard("/data/x")
+
+        assert result["success"] is False
+        assert result["error"]
+
+
 class TestApiSelectFolder:
     """Tests for GUIBackend.select_folder method."""
 
