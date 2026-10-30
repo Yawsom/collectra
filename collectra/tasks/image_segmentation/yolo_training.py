@@ -13,6 +13,8 @@ from ultralytics.data.dataset import YOLODataset
 from ultralytics.models.yolo.segment import SegmentationTrainer, SegmentationValidator
 from ultralytics.utils import __version__
 
+from collectra.types.images import open_oriented
+
 from .mask_metrics import mask_overlap
 from .sam3_metrics import EpochReporter
 
@@ -73,8 +75,7 @@ class BitmapDataset(Dataset):
 
     def __getitem__(self, index):
         metadata = self.images[index]
-        with Image.open(self.im_files[index]) as source:
-            image = source.convert("RGB")
+        image = open_oriented(self.im_files[index]).convert("RGB")
         width, height = image.size
         scale = self.imgsz / max(width, height)
         new_width, new_height = round(width * scale), round(height * scale)

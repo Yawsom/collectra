@@ -307,9 +307,8 @@ def test_classifier_writes_each_linked_crop_with_a_unique_name(tmp_path, monkeyp
         )
     task = ImageClassifierYOLO("classifier", model="unused.pt")
     log = tmp_path / "training"
-    from PIL import Image as PillowImage
+    from collectra.types.images import open_oriented as real_open
 
-    real_open = PillowImage.open
     opened = []
 
     def tracking_open(path, *args, **kwargs):
@@ -317,8 +316,7 @@ def test_classifier_writes_each_linked_crop_with_a_unique_name(tmp_path, monkeyp
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(
-        "collectra.tasks.image_classifier.yolo.PillowImage",
-        SimpleNamespace(open=tracking_open),
+        "collectra.tasks.image_classifier.yolo.open_oriented", tracking_open
     )
 
     train, _ = task._prepare_assets(["Pollen"], log, "validation", "", *links)

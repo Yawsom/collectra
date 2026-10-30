@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import importlib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...logger import get_logger
 from ..base import Task
@@ -35,7 +35,7 @@ def get_yolo_class():
 class YOLOTask(Task):
     """Base class for tasks backed by an Ultralytics YOLO model."""
 
-    model: str | Path | YOLO
+    model: Any = ""  # a path or a loaded Ultralytics YOLO model
     original_model_path: str | Path = ""
 
     def __init__(self, name: str, model: str | Path | YOLO = "", **kwargs) -> None:

@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import Annotated, TYPE_CHECKING
+from typing import Annotated, TYPE_CHECKING, Any
+
+from pydantic import Field
 
 from cappa import Arg
 
@@ -12,6 +14,7 @@ from .adaptation_commands import RFDETRAdaptationCommands
 from collectra.types.images import (
     Image,
     ImageCrop,
+    bake_orientation,
     convert_image_to_rgb,
     image_channel_count,
     image_size,
@@ -115,10 +118,10 @@ def load_rfdetr_model(model_path: str | Path) -> RFDETR:
 class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
     """RF-DETR task backed by the Roboflow rfdetr package."""
 
-    model: str | Path | object | None
+    model: Any = None  # a path or a loaded RF-DETR model
     original_model_path: str | Path | None = None
     resolution: int | None = None
-    batch_size: int = 1
+    batch_size: int = Field(default=1, ge=1)
 
     def __init__(
         self,
@@ -277,6 +280,12 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
                 help="Number of files to run through the model at once; results are saved after each batch."
             ),
         ] = 16,
+        force: Annotated[
+            bool,
+            Arg(
+                help="Rerun tasks whose outputs already exist, replacing those outputs. By default such tasks are skipped."
+            ),
+        ] = False,
     ) -> None:
         """Run this object detector for the supplied input files."""
         if batch_size < 1:
@@ -287,7 +296,12 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
             self.resolution = resolution
         self.batch_size = batch_size
         super().cli_run(
-            inputs, output=output, verbose=verbose, usage=usage, render=render
+            inputs,
+            output=output,
+            verbose=verbose,
+            usage=usage,
+            render=render,
+            force=force,
         )
 
     def _predict(self, images: list[Image]) -> list[tuple]:
@@ -589,6 +603,8 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
                 dest_name = f"{image_id}_{src_path.name}"
                 dest_path = split_dir / dest_name
                 shutil.copy2(src_path, dest_path)
+                # RF-DETR reads raw pixels; labels are in displayed coordinates.
+                bake_orientation(dest_path)
                 if rgb:
                     convert_image_to_rgb(dest_path)
 

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from collectra.cli import command
-from collectra.types.images import Image, ImageCrop
+from collectra.types.images import Image, ImageCrop, open_oriented
 from collectra.utils import change_dir
 
 from ...logger import get_logger
@@ -34,7 +34,7 @@ class DetectionTrainResult:
 class ObjectDetectionDETR(Task):
     """DETR task backed by Hugging Face Transformers."""
 
-    model: str | Path | nn.Module | None
+    model: Any = None  # a path or a loaded torch module
     original_model_path: str | Path | None = None
 
     def __init__(
@@ -368,9 +368,7 @@ class ObjectDetectionDETR(Task):
 
             def __getitem__(self, idx: int):
                 sample = self.samples[idx]
-                from PIL import Image as PILImage
-
-                with PILImage.open(sample["image_path"]).convert("RGB") as pil_image:
+                with open_oriented(sample["image_path"]).convert("RGB") as pil_image:
                     annotations = {
                         "image_id": idx,
                         "annotations": [],

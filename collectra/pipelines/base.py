@@ -36,7 +36,7 @@ import networkx as nx
 import yaml
 from rich.progress import track
 
-from collectra.utils import change_dir, load_class_from_string, remove_exif, write_yaml
+from collectra.utils import change_dir, load_class_from_string, write_yaml
 from collectra.cli import command, group
 from utils.get_types import get_param_types, get_return_type, unpack_types
 
@@ -159,6 +159,12 @@ class Collectra:
         verbose: bool = False,
         usage: bool = False,
         render: bool = False,
+        force: Annotated[
+            bool,
+            Arg(
+                help="Rerun tasks whose outputs already exist, replacing those outputs. By default such tasks are skipped."
+            ),
+        ] = False,
     ) -> None:
         """Run the complete pipeline or start at a named task."""
         from collectra.logger import setup_logging
@@ -176,6 +182,7 @@ class Collectra:
             single=single,
             usage=usage,
             render=render,
+            force=force,
         )
 
     @command(name="gui")
@@ -379,6 +386,7 @@ class Collectra:
                 - files: List of file paths to process.
                 - usage: Whether to track usage metrics.
                 - render: Whether to render workflow visualization.
+                - force: Rerun tasks whose outputs already exist.
                 - output: Output directory for results.
         """
         try:
@@ -434,6 +442,7 @@ class Collectra:
             "files": kwargs.pop("files", []),
             "usage": kwargs.pop("usage", False),
             "render": kwargs.pop("render", False),
+            "force": kwargs.pop("force", False),
             "output": kwargs.pop("output", None),
         }
         options["task_overrides"] = kwargs.copy()
@@ -556,6 +565,8 @@ class Collectra:
                     task = node.get_task()
                     if not isinstance(task, Task) or task.batch_size <= 1:
                         continue
+                    if not options["force"] and self._has_output(node):
+                        continue
                     self._apply_task_run_overrides(task, options["task_overrides"])
                     parents = self.node_manager.get_parents_artefact(node)
                     nodes_by_name[node.name] = node
@@ -631,6 +642,7 @@ class Collectra:
             key=key,
             value=value,
             render=options["render"],
+            force=options["force"],
             task_overrides=options["task_overrides"],
         )
 
@@ -692,14 +704,7 @@ class Collectra:
             shutil.copytree(savef, output_path, dirs_exist_ok=True)
             savef = output_path
 
-        self._remove_exif_from_images(savef)
         return savef
-
-    def _remove_exif_from_images(self, directory: Path):
-        """Remove EXIF data from all images in directory."""
-        for img_file in directory.glob("*"):
-            if img_file.suffix.lower() in Image.image_types():
-                remove_exif(img_file, img_file)
 
     def _handle_image_file(
         self, file_path: Path, output_dir: str | Path | None
@@ -713,7 +718,9 @@ class Collectra:
         )
         savef.mkdir(parents=True, exist_ok=True)
 
-        remove_exif(file_path, savef / file_path.name)
+        # Keep the file exactly as supplied, EXIF orientation included: every
+        # reader in Collectra applies it rather than stripping it.
+        shutil.copy2(file_path, savef / file_path.name)
         return savef
 
     def _create_results_file(self, directory: Path, key: str, value: str | Path):
@@ -986,16 +993,57 @@ class Collectra:
             logger.info(f"[yellow]Task {node.name} is not ready, skipping.[/yellow]")
             return
 
+        children = self._get_node_children(node)
+        force = kwargs.get("force", False)
+        if not force and self._has_output(node):
+            existing = [
+                f"{output.name} ({len(output.items)})"
+                for output in self._output_nodes(node)
+                if output.items
+            ]
+            logger.warning(
+                "Skipping task '%s' for %s: output already exists in %s. "
+                "Use --force to rerun it and replace that output.",
+                node.name,
+                Path(str(kwargs.get("value", ""))).name or "this file",
+                ", ".join(existing),
+            )
+            self._update_node_status(node, True)
+            self._run_nodes(children, **kwargs)
+            return
+
         if self._stage_gate and self._stage_gate.defer(node, kwargs.get("value", "")):
             return
 
-        children = self._get_node_children(node)
+        previous = self._take_outputs(node) if force else []
         results = self._run_task(node, **kwargs)
+        if not results:
+            # A failed rerun must not destroy the output it was meant to replace.
+            for output, items in previous:
+                output.items.update(items)
 
         self._update_node_status(node, bool(results))
         self.render("workflow_run", file=kwargs.get("value", ""), render=render)
 
         self._run_nodes(children, *results, **kwargs)
+
+    def _output_nodes(self, node: TaskNode) -> list[ArtefactNode]:
+        return [
+            child
+            for child in self.node_manager.get_children(node)
+            if isinstance(child, ArtefactNode)
+        ]
+
+    def _has_output(self, node: TaskNode) -> bool:
+        """Whether any of a task's output nodes already holds items."""
+        return any(output.items for output in self._output_nodes(node))
+
+    def _take_outputs(self, node: TaskNode) -> list[tuple[ArtefactNode, dict]]:
+        """Empty a task's output nodes so new results replace the old ones."""
+        taken = [(output, dict(output.items)) for output in self._output_nodes(node)]
+        for output, _ in taken:
+            output.items.clear()
+        return taken
 
     def _execute_artefact_node(
         self, node: ArtefactNode, args: tuple, kwargs: dict, render: bool

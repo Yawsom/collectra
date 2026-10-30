@@ -22,9 +22,7 @@ class FakeRecognitionPredictor:
 
 
 def ocr(lines=("first", "second")):
-    task = OCRSuraya.__new__(OCRSuraya)
-    task.name = "ocr"
-    task.pipeline = None
+    task = OCRSuraya("ocr")
     task.detection_predictor = object()
     task.recognition_predictor = FakeRecognitionPredictor(lines=lines)
     return task

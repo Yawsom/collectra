@@ -143,3 +143,11 @@ def test_lazy_state_survives_assignment_to_a_field():
     assert task._private == ["kept"]
     assert task.undeclared == "also kept"
     assert task.label == "b"
+
+
+def test_instances_can_override_methods_like_plain_python_objects():
+    task = Greeter("g")
+    task.run = lambda text: "patched"
+    assert task.run(None) == "patched"
+    assert Greeter("other").run(Text(name="t", data="")).data == "hello "
+    assert "run" not in task.attributes or callable(task.attributes["run"])

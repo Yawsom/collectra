@@ -6,6 +6,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Annotated, TYPE_CHECKING
 
+from pydantic import Field
+
 from cappa import Arg
 
 from collectra.cli import command
@@ -70,7 +72,7 @@ class DetectionResult:
 class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
     singletons: bool = False
     imgsz: int | None = None
-    batch_size: int = 1
+    batch_size: int = Field(default=1, ge=1)
 
     @command(name="run")
     def cli_run(
@@ -96,6 +98,12 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
                 help="Number of files to run through the model at once; results are saved after each batch."
             ),
         ] = 16,
+        force: Annotated[
+            bool,
+            Arg(
+                help="Rerun tasks whose outputs already exist, replacing those outputs. By default such tasks are skipped."
+            ),
+        ] = False,
     ) -> None:
         """Run this object detector for the supplied input files."""
         if batch_size < 1:
@@ -106,7 +114,12 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
             self.imgsz = imgsz
         self.batch_size = batch_size
         super().cli_run(
-            inputs, output=output, verbose=verbose, usage=usage, render=render
+            inputs,
+            output=output,
+            verbose=verbose,
+            usage=usage,
+            render=render,
+            force=force,
         )
 
     @threading_locked()

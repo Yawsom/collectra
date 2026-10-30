@@ -24,7 +24,7 @@ from rich.progress import track
 
 from collectra.cli import command
 from collectra.tasks.base import Task
-from collectra.types.images import Image
+from collectra.types.images import Image, open_oriented
 from collectra.types.texts import Text
 from collectra.utils import threading_locked
 
@@ -91,8 +91,7 @@ class _ExportedLines:
 
     def __getitem__(self, index):
         item = self.items[index]
-        with PILImage.open(self.directory / item["file"]) as image:
-            return _rgb(image), item["text"]
+        return _rgb(open_oriented(self.directory / item["file"])), item["text"]
 
 
 class OCRHuggingFace(Task):

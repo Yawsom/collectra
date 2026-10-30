@@ -18,7 +18,7 @@ from ultralytics.models.yolo.classify import (
 from ultralytics.nn.tasks import yaml_model_load
 from ultralytics.utils import LOGGER
 
-from collectra.types.images import read_tiff_channels
+from collectra.types.images import open_oriented, read_tiff_channels
 from .torchvision import _target_tiff_pixels, _tiff_tensor
 from .yolo import _classification_channels
 
@@ -28,10 +28,10 @@ def load_channels(path):
     if Path(path).suffix.lower() in {".tif", ".tiff"}:
         pixels = read_tiff_channels(path)
     else:
-        with PillowImage.open(path) as image:
-            if image.mode == "P":
-                image = image.convert("RGBA" if "transparency" in image.info else "RGB")
-            pixels = np.array(image)
+        image = open_oriented(path)
+        if image.mode == "P":
+            image = image.convert("RGBA" if "transparency" in image.info else "RGB")
+        pixels = np.array(image)
         if pixels.ndim == 2:
             pixels = pixels[..., None]
     return _tiff_tensor(pixels)

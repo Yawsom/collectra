@@ -153,6 +153,7 @@ def test_run_cli_model_override(model, imgsz):
                 verbose=False,
                 usage=False,
                 render=True,
+                force=False,
             ),
             Path(model) if model is not None else "configured.pt",
             imgsz,

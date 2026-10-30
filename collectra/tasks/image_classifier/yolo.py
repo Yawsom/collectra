@@ -10,7 +10,12 @@ from cappa import Arg
 from PIL import Image as PillowImage
 
 from collectra.cli import command
-from collectra.types.images import Image, ImageCrop, image_channel_count
+from collectra.types.images import (
+    Image,
+    ImageCrop,
+    image_channel_count,
+    open_oriented,
+)
 from collectra.types.links import Link
 from collectra.utils import change_dir
 
@@ -439,9 +444,7 @@ class ImageClassifierYOLO(YOLOTask):
                 elif isinstance(target, ImageCrop):
                     source_path = src.resolve()
                     if source_path not in source_images:
-                        with PillowImage.open(source_path) as source:
-                            source.load()
-                            source_images[source_path] = source.copy()
+                        source_images[source_path] = open_oriented(source_path)
                     with source_images[source_path].crop(pixel_box) as cropped:
                         rotated = cropped.rotate(
                             target.orientation.to_degree(), expand=True

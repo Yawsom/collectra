@@ -28,6 +28,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image as ImagePil
+from PIL import ImageOps
 
 from collectra.cli import command
 
@@ -65,6 +66,51 @@ def _tiff_dimensions(path: str | Path) -> tuple[int, int, int]:
     return shape[axes.index("X")], shape[axes.index("Y")], channels
 
 
+_TURNED = {5, 6, 7, 8}  # EXIF orientations that exchange width and height
+
+
+def _is_tiff(path: str | Path) -> bool:
+    return Path(path).suffix.lower() in {".tif", ".tiff"}
+
+
+def _displayed_size(image: ImagePil.Image) -> tuple[int, int]:
+    """Size after applying the EXIF orientation tag, as viewers display it."""
+    width, height = image.size
+    if image.getexif().get(0x0112) in _TURNED:
+        return height, width
+    return width, height
+
+
+def open_oriented(path: str | Path) -> ImagePil.Image:
+    """Open an image with its EXIF orientation applied, so pixels match the display.
+
+    Browsers and image viewers honour the tag; Pillow does not. Every pixel read
+    in Collectra goes through here, so coordinates agree with what the user sees.
+    TIFFs are left alone: their tags describe scientific channel layouts.
+    """
+    with ImagePil.open(path) as image:
+        if _is_tiff(path):
+            return image.copy()
+        return ImageOps.exif_transpose(image)
+
+
+def bake_orientation(path: str | Path) -> None:
+    """Rewrite a raster file in place with its EXIF orientation applied to the pixels.
+
+    For temporary training copies read by libraries that ignore the tag. Files
+    that are untagged, upright or TIFF are left byte-for-byte untouched.
+    """
+    path = Path(path)
+    if _is_tiff(path):
+        return
+    with ImagePil.open(path) as image:
+        if image.getexif().get(0x0112, 1) == 1:
+            return
+        image_format = image.format
+        oriented = ImageOps.exif_transpose(image)
+    oriented.save(path, format=image_format)
+
+
 def image_channel_count(path: str | Path) -> int:
     """Inspect image metadata for its channel count; never convert image pixels."""
     if Path(path).suffix.lower() in {".tif", ".tiff"}:
@@ -93,7 +139,7 @@ def image_size(path: str | Path) -> tuple[int, int]:
     if Path(path).suffix.lower() in {".tif", ".tiff"}:
         return _tiff_dimensions(path)[:2]
     with ImagePil.open(path) as image:
-        return image.size
+        return _displayed_size(image)
 
 
 def read_tiff_channels(path: str | Path, maxworkers: int | None = None):
@@ -126,7 +172,7 @@ def _image_metadata(
         width, height, _ = _tiff_dimensions(path)
         return width, height, "TIFF"
     with ImagePil.open(path) as image:
-        width, height = image.size
+        width, height = _displayed_size(image)
         return width, height, image.format
 
 
@@ -370,7 +416,7 @@ class Image(Artefact):
         return f"image/{self.ext.lower()}" if self.ext else "image"
 
     def pil(self) -> ImagePil.Image:
-        image = ImagePil.open(self.get_path())
+        image = open_oriented(self.get_path())
         return image.rotate(self.orientation.to_degree(), expand=True)
 
     def display(self, context) -> dict:
@@ -551,8 +597,7 @@ class ImageCrop(Image):
                 f"y_center={self.y_center}, width={self.width_relative}, "
                 f"height={self.height_relative}), pixel_box={coordinates}"
             )
-        with ImagePil.open(self.get_path()) as imf:
-            im_crop = imf.crop(coordinates)
+        im_crop = open_oriented(self.get_path()).crop(coordinates)
         return im_crop.rotate(self.orientation.to_degree(), expand=True)
 
     def coordinates(self) -> tuple[float, float, float, float]:
@@ -735,8 +780,7 @@ class ImageSegmentation(Image):
         )
 
     def pil(self) -> ImagePil.Image:
-        with ImagePil.open(self.get_path()) as image:
-            return self.masked_pil(image)
+        return self.masked_pil(open_oriented(self.get_path()))
 
     def _load_buffer(self, img: ImagePil.Image) -> bytes:
         buffer = io.BytesIO()

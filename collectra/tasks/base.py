@@ -13,8 +13,9 @@ import re
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from typing import Any, Generic
+from typing import Annotated, Any, Generic
 
+from cappa import Arg
 from pydantic import BaseModel, ConfigDict, Field
 
 from collectra.commons import EntityMixin, Node, NodeStatus, T, TaskContext
@@ -53,6 +54,10 @@ class Task(EntityMixin, BaseModel, Generic[T]):
         super().__init__(name=name, **kwargs)
 
     def __setattr__(self, name: str, value: Any) -> None:
+        if name not in type(self).model_fields and hasattr(type(self), name):
+            # Shadowing a method or property: plain Python semantics, not a field.
+            object.__setattr__(self, name, value)
+            return
         # Validated assignment rebuilds ``__dict__`` from the declared fields,
         # which would drop cached properties and private state held there.
         lazy = {
@@ -177,6 +182,12 @@ class Task(EntityMixin, BaseModel, Generic[T]):
         verbose: bool = False,
         usage: bool = False,
         render: bool = False,
+        force: Annotated[
+            bool,
+            Arg(
+                help="Rerun tasks whose outputs already exist, replacing those outputs. By default such tasks are skipped."
+            ),
+        ] = False,
     ) -> None:
         """Run this task for the supplied input files."""
         if self.pipeline is None:
@@ -189,6 +200,7 @@ class Task(EntityMixin, BaseModel, Generic[T]):
             verbose=verbose,
             usage=usage,
             render=render,
+            force=force,
         )
 
 

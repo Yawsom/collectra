@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from collectra.types.images import Image, ImageCrop, Orientation
 
@@ -15,7 +15,7 @@ __all__ = ["ImageOrienter"]
 
 class ImageOrienter(Task):
 
-    model: str | Path | EfficientNet
+    model: Any  # a path or a loaded torchvision EfficientNet
 
     def __init__(self, name, model: str | Path | EfficientNet, **kwargs):
         super().__init__(name, model=model, **kwargs)

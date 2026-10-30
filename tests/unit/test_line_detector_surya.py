@@ -19,12 +19,10 @@ class FakeDetectionPredictor:
 
 
 def detector(boxes=(), **kwargs):
-    task = LineDetectorSurya.__new__(LineDetectorSurya)
-    task.name = "lines"
+    task = LineDetectorSurya("lines")
     task.merge_horizontal = kwargs.get("merge_horizontal", False)
     task.min_height = kwargs.get("min_height", 0)
     task.detection_predictor = FakeDetectionPredictor(boxes)
-    task.pipeline = None
     return task
 
 
