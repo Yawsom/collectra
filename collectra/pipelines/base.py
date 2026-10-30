@@ -186,6 +186,23 @@ class Collectra:
             force=force,
         )
 
+    @command(name="path")
+    def cli_path(self) -> None:
+        """Print the folder this pipeline lives in."""
+        print(self.path.resolve())
+
+    @command(name="code", available=lambda: shutil.which("code"))
+    def cli_code(self) -> None:
+        """Open this pipeline's folder in VS Code."""
+        import subprocess
+
+        code = shutil.which("code")
+        if code is None:
+            raise SystemExit("VS Code's `code` command was not found on your PATH")
+        result = subprocess.run([code, str(self.path.resolve())])
+        if result.returncode:
+            raise SystemExit(f"Could not open VS Code (exit code {result.returncode})")
+
     @command(name="gui")
     def launch_gui(
         self, *inputs: Path, debug: bool = False,

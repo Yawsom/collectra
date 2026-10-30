@@ -309,3 +309,32 @@ def test_usage_is_recorded_for_the_file_being_run_not_the_one_prefetched(tmp_pat
         loader.return_value.LLMWrapper.get_token_count.return_value = {"tokens": 5}
         task.run(*entries_for("a")[0])
     assert yaml.safe_load(usage_file.read_text()) == {"describe": {"tokens": 5}}
+
+
+# --- temperature ----------------------------------------------------------
+
+
+def test_temperature_is_not_set_unless_asked_for():
+    """Some models reject ``temperature``; the model's own default is the default."""
+    assert LLM("t", "m", template="{x}").temperature is None
+
+
+def test_an_explicit_temperature_is_kept():
+    assert LLM("t", "m", template="{x}", temperature=0.2).temperature == 0.2
+    assert LLM("t", "m", template="{x}", temperature=0).temperature == 0
+
+
+def test_the_model_is_loaded_without_a_temperature_by_default():
+    with patch("collectra.tasks.llms.get_llmloader") as loader:
+        LLM("t", "m", template="{x}").llm
+    loader.return_value.load.assert_called_once_with(
+        "m", temperature=None, max_tokens=None
+    )
+
+
+def test_the_model_is_loaded_with_the_requested_temperature():
+    with patch("collectra.tasks.llms.get_llmloader") as loader:
+        LLM("t", "m", template="{x}", temperature=0.3, max_tokens=50).llm
+    loader.return_value.load.assert_called_once_with(
+        "m", temperature=0.3, max_tokens=50
+    )

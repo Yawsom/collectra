@@ -18,20 +18,35 @@ import cappa
 
 CLI_KIND = "__collectra_cli_kind__"
 CLI_NAME = "__collectra_cli_name__"
+CLI_AVAILABLE = "__collectra_cli_available__"
 
 
-def _member(kind: str, name: str | None = None):
+def _member(
+    kind: str,
+    name: str | None = None,
+    available: Callable[[], Any] | None = None,
+):
     def decorate(func: Callable[..., Any]) -> Callable[..., Any]:
         setattr(func, CLI_KIND, kind)
         setattr(func, CLI_NAME, name)
+        setattr(func, CLI_AVAILABLE, available)
         return func
 
     return decorate
 
 
-def command(func: Callable[..., Any] | None = None, *, name: str | None = None):
-    """Mark a method as a terminal CLI command."""
-    decorator = _member("command", name)
+def command(
+    func: Callable[..., Any] | None = None,
+    *,
+    name: str | None = None,
+    available: Callable[[], Any] | None = None,
+):
+    """Mark a method as a terminal CLI command.
+
+    ``available`` is checked each time the CLI is built; a command whose check
+    is falsy (for example, one that needs an optional program) is left out.
+    """
+    decorator = _member("command", name, available)
     return decorator(func) if func is not None else decorator
 
 
@@ -51,6 +66,9 @@ def _cli_members(obj: Any):
         if isinstance(definition, (staticmethod, classmethod)):
             definition = definition.__func__
         if not getattr(definition, CLI_KIND, None):
+            continue
+        available = getattr(definition, CLI_AVAILABLE, None)
+        if available is not None and not available():
             continue
         member = getattr(obj, member_name)
         kind = getattr(member, CLI_KIND, None)

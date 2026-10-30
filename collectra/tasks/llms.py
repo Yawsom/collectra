@@ -64,7 +64,8 @@ class LLM(Task):
         model (str): Model identifier or path for the LLM.
         template (str | Path): Prompt template string or path to template file.
             ``prompt`` is accepted as an alias, matching other tasks' option name.
-        temperature (float): Sampling temperature for generation (0.0 to 1.0).
+        temperature (float | None): Sampling temperature for generation. Leave
+            unset (None) to use the model's own default.
         max_tokens (int): Maximum number of tokens to generate.
         variables (dict): Additional variables for template substitution.
         batch_size (int): Number of prompts sent to the model concurrently when
@@ -79,7 +80,8 @@ class LLM(Task):
             )
         self.template: str = kwargs.get("template") or kwargs.get("prompt", "")
         self.preamble: str = kwargs.get("preamble", "")
-        self.temperature = kwargs.get("temperature", 0.8)
+        # None leaves the model at its own default: some models reject the setting.
+        self.temperature = kwargs.get("temperature")
         self.max_tokens = kwargs.get("max_tokens", None)
         self.model = model
         self.parser = StrOutputParser()
