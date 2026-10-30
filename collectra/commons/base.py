@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Generic, TypeVar
 
-__all__ = ["T", "BaseEntity", "Node", "NodeStatus", "TaskContext"]
+__all__ = ["T", "EntityMixin", "BaseEntity", "Node", "NodeStatus", "TaskContext"]
 
 T = TypeVar("T")
 
@@ -29,17 +29,11 @@ class TaskContext:
     single_run: bool = False
 
 
-class BaseEntity(ABC, Generic[T]):
-
-    def __init__(self, name: str) -> None:
-        self.name = name
+class EntityMixin:
+    """Naming and serialisation shared by artefacts and pydantic task models."""
 
     def __str__(self) -> str:
         return f"{self.name}\n{self.get_class_path()}"
-
-    @abstractmethod
-    def __call__(self) -> T:
-        pass
 
     def get_name(self) -> str:
         """Get the name of the task.
@@ -60,7 +54,10 @@ class BaseEntity(ABC, Generic[T]):
     @property
     def attributes(self) -> dict:
         ignore = self.attributes_to_ignore()
-        return {k: v for k, v in self.__dict__.items() if k not in ignore}
+        values = dict(self.__dict__)
+        # Pydantic keeps undeclared (extra) attributes outside ``__dict__``.
+        values.update(getattr(self, "__pydantic_extra__", None) or {})
+        return {k: v for k, v in values.items() if k not in ignore}
 
     def attributes_to_ignore(self) -> set:
         return set()
@@ -75,6 +72,16 @@ class BaseEntity(ABC, Generic[T]):
             'collectra.images.Image'
         """
         return f"{cls.__module__.split('.')[0]}.{cls.__name__}"
+
+
+class BaseEntity(EntityMixin, ABC, Generic[T]):
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    @abstractmethod
+    def __call__(self) -> T:
+        pass
 
 
 class NodeStatus(enum.Enum):

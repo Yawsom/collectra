@@ -59,6 +59,24 @@ from .node_graph_manager import NodeGraphManager
 logger = get_logger(__name__)
 
 
+class StageGate:
+    """Holds files back at batchable tasks so a whole chunk can prefetch together."""
+
+    def __init__(self, batchable: set[str]):
+        self.batchable = batchable
+        self.current: set[str] = set()
+        self.deferred: dict[str, list[TaskNode]] = {}
+
+    def defer(self, node: TaskNode, value) -> bool:
+        """Hold ``node`` for the file at ``value``; False if it should run now."""
+        if node.name not in self.batchable or node.name in self.current:
+            return False
+        held = self.deferred.setdefault(str(value), [])
+        if node not in held:
+            held.append(node)
+        return True
+
+
 class Collectra:
     """Main workflow management class for Collectra pipelines.
 
@@ -74,6 +92,7 @@ class Collectra:
 
     # Graph visualization colors
     COLOR_PROCESSING = "orange"
+    _stage_gate: StageGate | None = None
     COLOR_SUCCESS = "green"
     COLOR_FAILURE = "red"
     COLOR_FONT = "black"
@@ -430,24 +449,65 @@ class Collectra:
     def _process_files(self, starting_nodes: list[TaskNode], options: dict):
         """Process each file in the workflow.
 
+        Files are processed in chunks sized to the largest ``batch_size`` of any
+        task that can batch its work, so those tasks see a whole chunk at once.
+
         Args:
             starting_nodes: List of nodes to start execution from.
             options: Execution options (single, files, usage, render, output).
         """
         files = options["files"]
+        downstream = {} if options["single"] else self._batchable_tasks(starting_nodes)
         batch_size = self._starting_batch_size(starting_nodes)
+        batch_size = max([batch_size, *(t.batch_size for t in downstream.values())])
         for start in range(0, len(files), batch_size):
             chunk = files[start : start + batch_size]
-            if batch_size > 1:
-                self._prefetch_files(starting_nodes, chunk, options)
-            try:
-                for file_path in chunk:
+            self._process_chunk(starting_nodes, chunk, options, downstream)
+
+    def _process_chunk(
+        self,
+        starting_nodes: list[TaskNode],
+        chunk: list,
+        options: dict,
+        downstream: dict[str, Task],
+    ):
+        """Run a chunk of files, pausing each at batchable tasks until all arrive.
+
+        Every file runs until it reaches a batchable task further down the DAG
+        and is saved there. Once the whole chunk has arrived the task prefetches
+        all of its inputs together, and each file resumes from its saved results.
+        """
+        stage = [(file_path, starting_nodes) for file_path in chunk]
+        stage_options = options
+        prefetch = self._starting_batch_size(starting_nodes) > 1
+        self._stage_gate = StageGate(set(downstream)) if downstream else None
+        try:
+            while stage:
+                if prefetch:
+                    self._prefetch_stage(stage, stage_options)
+                deferred: list[tuple[str, list[TaskNode]]] = []
+                for file_path, nodes in stage:
+                    if self._stage_gate:
+                        self._stage_gate.current = {node.name for node in nodes}
+                        self._stage_gate.deferred = {}
                     try:
-                        self._process_single_file(starting_nodes, file_path, options)
+                        self._process_single_file(nodes, file_path, stage_options)
                     except Exception as e:
                         logger.error("Error processing file: %s", e, exc_info=True)
-            finally:
-                self._clear_prefetch(starting_nodes)
+                    if self._stage_gate:
+                        deferred.extend(self._stage_gate.deferred.items())
+                # Later stages resume from each file's saved folder, in place.
+                stage = deferred
+                stage_options = {**options, "output": None}
+                prefetch = True
+        finally:
+            self._stage_gate = None
+            self._clear_prefetch(
+                [*starting_nodes, *self._task_nodes_by_name(downstream)]
+            )
+
+    def _task_nodes_by_name(self, tasks: dict[str, Task]) -> list[TaskNode]:
+        return [self.node_manager.resolve_node(name) for name in tasks]
 
     def _starting_batch_size(self, starting_nodes: list[TaskNode]) -> int:
         """Number of files to run through the starting tasks per batch."""
@@ -458,42 +518,64 @@ class Collectra:
         ]
         return max([1, *sizes])
 
-    def _prefetch_files(
-        self, starting_nodes: list[TaskNode], files: list, options: dict
-    ):
-        """Let starting tasks batch their model work across ``files`` up front.
+    def _batchable_tasks(self, starting_nodes: list[TaskNode]) -> dict[str, Task]:
+        """Tasks below ``starting_nodes`` that batch their work via ``prefetch``."""
+        start_names = {node.name for node in starting_nodes}
+        found: dict[str, Task] = {}
+        seen: set[str] = set()
+        queue = list(starting_nodes)
+        while queue:
+            node = queue.pop()
+            if node.name in seen:
+                continue
+            seen.add(node.name)
+            queue.extend(self.node_manager.get_children(node))
+            if not isinstance(node, TaskNode) or node.name in start_names:
+                continue
+            task = node.get_task()
+            if (
+                isinstance(task, Task)
+                and task.batch_size > 1
+                and type(task).prefetch is not Task.prefetch
+            ):
+                found[node.name] = task
+        return found
+
+    def _prefetch_stage(self, stage: list[tuple[str, list[TaskNode]]], options: dict):
+        """Let each file's pending tasks batch their model work up front.
 
         The files are then processed one at a time as usual, with each task
         reusing what it cached, so results are saved after every batch.
         """
         gathered: dict[str, list] = {}
-        for file_path in files:
+        nodes_by_name: dict[str, TaskNode] = {}
+        for file_path, nodes in stage:
             try:
-                key, value = self._setup_file(starting_nodes, file_path, options)
-                for node in starting_nodes:
+                self._setup_file(nodes, file_path, options)
+                for node in nodes:
                     task = node.get_task()
                     if not isinstance(task, Task) or task.batch_size <= 1:
                         continue
                     self._apply_task_run_overrides(task, options["task_overrides"])
                     parents = self.node_manager.get_parents_artefact(node)
+                    nodes_by_name[node.name] = node
                     gathered.setdefault(node.name, []).extend(
                         list(entry) for entry in task.prepare_inputs(parents)
                     )
             except Exception as e:
                 logger.warning("Could not prepare %s for batching: %s", file_path, e)
-        for node in starting_nodes:
-            if node.name in gathered:
-                try:
-                    with change_dir(self.path):
-                        node.get_task().prefetch(gathered[node.name])
-                except Exception as e:
-                    logger.warning(
-                        "Batched run of %s failed, running files individually: %s",
-                        node.name,
-                        e,
-                        exc_info=True,
-                    )
-                    node.get_task().clear_prefetch()
+        for name, node in nodes_by_name.items():
+            try:
+                with change_dir(self.path):
+                    node.get_task().prefetch(gathered[name])
+            except Exception as e:
+                logger.warning(
+                    "Batched run of %s failed, running files individually: %s",
+                    name,
+                    e,
+                    exc_info=True,
+                )
+                node.get_task().clear_prefetch()
 
     def _clear_prefetch(self, starting_nodes: list[TaskNode]):
         for node in starting_nodes:
@@ -902,6 +984,9 @@ class Collectra:
         """Execute a single task node."""
         if self._check_task_ready(node) != NodeStatus.READY:
             logger.info(f"[yellow]Task {node.name} is not ready, skipping.[/yellow]")
+            return
+
+        if self._stage_gate and self._stage_gate.defer(node, kwargs.get("value", "")):
             return
 
         children = self._get_node_children(node)

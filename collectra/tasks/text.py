@@ -13,7 +13,7 @@ __all__ = ["ConcatenateText"]
 class ConcatenateText(Task[Text]):
     """Join every input Text artefact into one Text artefact."""
 
-    collective = True
+    collective: bool = True
 
     def __init__(self, name: str, separator: str = "\n", **kwargs: Any) -> None:
         super().__init__(name, separator=separator, **kwargs)

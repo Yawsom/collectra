@@ -13,16 +13,15 @@ import re
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from typing import TYPE_CHECKING, Generic
+from typing import Any, Generic
 
-from collectra.commons import BaseEntity, Node, NodeStatus, T, TaskContext
+from pydantic import BaseModel, ConfigDict, Field
+
+from collectra.commons import EntityMixin, Node, NodeStatus, T, TaskContext
 from collectra.cli import command
 
-if TYPE_CHECKING:
-    from collectra.pipelines.base import Collectra
 
-
-class Task(BaseEntity, Generic[T]):
+class Task(EntityMixin, BaseModel, Generic[T]):
     """Abstract base class for all tasks in Collectra workflows.
 
     Defines the common interface and behavior that all tasks must implement.
@@ -35,16 +34,44 @@ class Task(BaseEntity, Generic[T]):
         fusion (bool): Opt-in feature fusion for task types that support it.
     """
 
+    model_config = ConfigDict(
+        extra="allow",
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        protected_namespaces=(),
+    )
+
+    name: str
     collective: bool = False
     fusion: bool = False
-    batch_size: int = 1
+    batch_size: int = Field(default=1, ge=1)
+    # Runtime wiring, set by the pipeline: neither validated, printed nor dumped.
+    pipeline: Any = Field(default=None, exclude=True, repr=False)
+    context: TaskContext = Field(default_factory=TaskContext, exclude=True, repr=False)
 
     def __init__(self, name: str, **kwargs) -> None:
-        super().__init__(name)
-        self.pipeline: Collectra | None = None
-        self.context: TaskContext = TaskContext()
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+        super().__init__(name=name, **kwargs)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Validated assignment rebuilds ``__dict__`` from the declared fields,
+        # which would drop cached properties and private state held there.
+        lazy = {
+            key: held
+            for key, held in self.__dict__.items()
+            if key not in type(self).model_fields
+        }
+        super().__setattr__(name, value)
+        for key, held in lazy.items():
+            self.__dict__.setdefault(key, held)
+
+    def attributes_to_ignore(self) -> set:
+        return super().attributes_to_ignore() | {"pipeline", "context"}
+
+    # Tasks are stateful, long-lived objects held by graph nodes: compare by identity.
+    def __eq__(self, other: object) -> bool:
+        return self is other
+
+    __hash__ = object.__hash__
 
     @property
     def input_dict(self) -> dict[str, list]:

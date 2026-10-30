@@ -3,7 +3,10 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
+from langchain_core.messages import AIMessage
 
+from collectra.commons import TaskContext
 from collectra.tasks.llms import LLM
 from collectra.types import Image, Text
 
@@ -157,9 +160,8 @@ def test_invoke():
 
 def test_run_returns_text():
     mock_self = MagicMock(spec=LLM)
-    mock_self.pre_run.return_value = ("Hello {name}", r"\{(.*?)\}")
-    mock_self.replace_inputs.return_value = [{"type": "text", "text": "Hello Alice"}]
-    mock_self.messages = [MagicMock()]
+    mock_self._prefetched = {}
+    mock_self._build_messages.return_value = [{"type": "text", "text": "Hello Alice"}]
     mock_self.invoke.return_value = "some response"
     mock_self.get_output_name.return_value = "output_name"
 
@@ -173,8 +175,137 @@ def test_run_returns_text():
 def test_run_returns_none_on_exception():
     mock_self = MagicMock(spec=LLM)
     mock_self.name = "test_task"
-    mock_self.pre_run.side_effect = RuntimeError("model failed")
+    mock_self._build_messages.side_effect = RuntimeError("model failed")
 
     result = LLM.run(mock_self)
 
     assert result is None
+
+
+# --- batching -------------------------------------------------------------
+
+
+class FakeChain:
+    """Stands in for the LangChain model; records every call made to it."""
+
+    def __init__(self, fail_on=()):
+        self.invoked = []
+        self.batches = []
+        self.configs = []
+        self.fail_on = fail_on
+
+    @staticmethod
+    def _text(messages):
+        return messages[1].content[-1]["text"]
+
+    def invoke(self, messages):
+        self.invoked.append(self._text(messages))
+        return AIMessage(content=f"answer to {self._text(messages)}")
+
+    def batch(self, inputs, config=None, return_exceptions=False):
+        self.batches.append([self._text(messages) for messages in inputs])
+        self.configs.append(config)
+        return [
+            (
+                RuntimeError("boom")
+                if self._text(messages) in self.fail_on
+                else AIMessage(content=f"batched {self._text(messages)}")
+            )
+            for messages in inputs
+        ]
+
+
+def make_task(chain, **kwargs):
+    task = LLM("describe", "fake-model", template="{text}", **kwargs)
+    task.__dict__["llm"] = chain  # bypasses lazy loading of the real model
+    return task
+
+
+def entries_for(*texts):
+    return [[Text(name="text", data=text)] for text in texts]
+
+
+def test_batch_size_defaults_to_one_and_is_validated():
+    assert make_task(FakeChain()).batch_size == 1
+    assert make_task(FakeChain(), batch_size=4).batch_size == 4
+    with pytest.raises(ValueError, match="batch_size"):
+        make_task(FakeChain(), batch_size=0)
+
+
+def test_prefetch_sends_entries_in_batches_of_batch_size():
+    chain = FakeChain()
+    task = make_task(chain, batch_size=2)
+    task.prefetch(entries_for("a", "b", "c"))
+    assert [len(batch) for batch in chain.batches] == [2, 1]
+    assert all(config == {"max_concurrency": 2} for config in chain.configs)
+
+
+def test_run_reuses_prefetched_responses_without_calling_the_model_again():
+    chain = FakeChain()
+    task = make_task(chain, batch_size=3)
+    task.prefetch(entries_for("a", "b"))
+    first, second = (task.run(*entry) for entry in entries_for("a", "b"))
+    assert chain.invoked == []
+    assert (first.data, second.data) == ("batched a", "batched b")
+
+
+def test_prefetched_response_is_matched_to_its_own_inputs():
+    chain = FakeChain()
+    task = make_task(chain, batch_size=3)
+    task.prefetch(entries_for("a", "b"))
+    # Consume out of order: each response must belong to its own prompt.
+    assert task.run(*entries_for("b")[0]).data == "batched b"
+    assert task.run(*entries_for("a")[0]).data == "batched a"
+    assert chain.invoked == []
+
+
+def test_each_prefetched_response_is_used_once_then_the_model_is_called():
+    chain = FakeChain()
+    task = make_task(chain, batch_size=2)
+    task.prefetch(entries_for("a"))
+    assert task.run(*entries_for("a")[0]).data == "batched a"
+    assert task.run(*entries_for("a")[0]).data == "answer to a"
+    assert chain.invoked == ["a"]
+
+
+def test_failed_batch_items_fall_back_to_individual_calls():
+    chain = FakeChain(fail_on=("b",))
+    task = make_task(chain, batch_size=2)
+    task.prefetch(entries_for("a", "b"))
+    assert task.run(*entries_for("a")[0]).data == "batched a"
+    assert task.run(*entries_for("b")[0]).data == "answer to b"
+    assert chain.invoked == ["b"]
+
+
+def test_prefetch_skips_entries_that_cannot_be_built():
+    chain = FakeChain()
+    task = make_task(chain, batch_size=2)
+    task.prefetch([[], *entries_for("a")])
+    assert chain.batches == [["a"]]
+
+
+def test_prefetch_with_nothing_to_send_makes_no_calls():
+    chain = FakeChain()
+    task = make_task(chain, batch_size=2)
+    task.prefetch([])
+    assert chain.batches == []
+
+
+def test_clear_prefetch_discards_cached_responses():
+    chain = FakeChain()
+    task = make_task(chain, batch_size=2)
+    task.prefetch(entries_for("a"))
+    task.clear_prefetch()
+    assert task.run(*entries_for("a")[0]).data == "answer to a"
+
+
+def test_usage_is_recorded_for_the_file_being_run_not_the_one_prefetched(tmp_path):
+    chain = FakeChain()
+    task = make_task(chain, batch_size=2)
+    task.prefetch(entries_for("a"))
+    usage_file = tmp_path / "usage.yaml"
+    task.context = TaskContext(usage_file=usage_file)
+    with patch("collectra.tasks.llms.get_llmloader") as loader:
+        loader.return_value.LLMWrapper.get_token_count.return_value = {"tokens": 5}
+        task.run(*entries_for("a")[0])
+    assert yaml.safe_load(usage_file.read_text()) == {"describe": {"tokens": 5}}

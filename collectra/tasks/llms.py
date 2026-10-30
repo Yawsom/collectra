@@ -16,6 +16,8 @@ Classes:
 
 __all__ = ["LLM"]
 
+import hashlib
+import json
 import os
 import re
 from functools import cached_property
@@ -44,6 +46,7 @@ def get_llmloader():
         ) from error
     return llmloader
 
+
 load_dotenv()
 
 logger = get_logger(__name__)
@@ -64,6 +67,8 @@ class LLM(Task):
         temperature (float): Sampling temperature for generation (0.0 to 1.0).
         max_tokens (int): Maximum number of tokens to generate.
         variables (dict): Additional variables for template substitution.
+        batch_size (int): Number of prompts sent to the model concurrently when
+            the pipeline prefetches many files at once. 1 disables batching.
     """
 
     def __init__(self, name: str, model: str, **kwargs):
@@ -78,6 +83,10 @@ class LLM(Task):
         self.max_tokens = kwargs.get("max_tokens", None)
         self.model = model
         self.parser = StrOutputParser()
+        if int(self.batch_size) < 1:
+            raise ValueError(f"LLM task {name!r} needs batch_size >= 1")
+        self.batch_size = int(self.batch_size)
+        self._prefetched: dict[str, list] = {}
 
         init_messages = (
             SystemMessage(content=kwargs.get("system", ""))
@@ -178,8 +187,64 @@ class LLM(Task):
 
         return messages
 
-    def invoke(self) -> str:
-        response = self.chain.invoke(self.messages)
+    def _build_messages(self, args: tuple) -> list[str | dict]:
+        """Fill the prompt template for ``args``, leaving ``self.messages`` ready to send."""
+        prompt, pattern = self.pre_run()
+        content = self.replace_inputs(pattern, prompt, *args)
+        self.messages.append(HumanMessage(content=content))
+        self.check_inputs(*args)
+        return content
+
+    @staticmethod
+    def _cache_key(content: list[str | dict]) -> str:
+        """Identify a prompt by its content (images are hashed, not stored)."""
+        return hashlib.sha256(
+            json.dumps(content, sort_keys=True, default=str).encode()
+        ).hexdigest()
+
+    def prefetch(self, entries: list[list]) -> None:
+        """Send the prompts for many entries to the model in concurrent batches.
+
+        Raw responses are cached by prompt content and consumed by ``run``, so
+        usage is recorded against the file that is actually being processed. A
+        prompt that fails here is simply left for ``run`` to retry on its own.
+        """
+        self._prefetched = {}
+        prompts: list[tuple[str, list]] = []
+        for entry in entries:
+            if not entry:
+                continue
+            try:
+                content = self._build_messages(tuple(entry))
+            except Exception as e:
+                logger.warning(
+                    "LLM task '%s' could not prepare an entry: %s", self.name, e
+                )
+                continue
+            prompts.append((self._cache_key(content), list(self.messages)))
+        for start in range(0, len(prompts), self.batch_size):
+            batch = prompts[start : start + self.batch_size]
+            responses = self.chain.batch(
+                [messages for _, messages in batch],
+                config={"max_concurrency": self.batch_size},
+                return_exceptions=True,
+            )
+            for (key, _), response in zip(batch, responses):
+                if isinstance(response, Exception):
+                    logger.warning(
+                        "LLM task '%s' batch item failed, will retry alone: %s",
+                        self.name,
+                        response,
+                    )
+                    continue
+                self._prefetched.setdefault(key, []).append(response)
+
+    def clear_prefetch(self) -> None:
+        self._prefetched = {}
+
+    def invoke(self, response=None) -> str:
+        if response is None:
+            response = self.chain.invoke(self.messages)
 
         # Use context for usage tracking instead of environment variable
         if self.context.usage_file:
@@ -222,15 +287,10 @@ class LLM(Task):
             Prints a success message when inference completes.
         """
         try:
-            prompt, pattern = self.pre_run()
+            content = self._build_messages(args)
 
-            messages = self.replace_inputs(pattern, prompt, *args)
-
-            self.messages.append(HumanMessage(content=messages))
-
-            self.check_inputs(*args)
-
-            response = self.invoke()
+            cached = self._prefetched.get(self._cache_key(content))
+            response = self.invoke(cached.pop(0) if cached else None)
 
             name = self.get_output_name()
             output = Text(name=name, data=response)
