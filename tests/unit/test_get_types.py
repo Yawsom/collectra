@@ -206,7 +206,7 @@ def test_unpack_types_tuple_return():
 
 
 def test_pipeline_io_extraction_pattern():
-    """Test the pattern used in Collectra._check_task_io for inputs."""
+    """Test the pattern used in Pipeline._check_task_io for inputs."""
 
     def task_run(input_data: str, config: dict) -> List[str]:
         return [input_data]
@@ -220,7 +220,7 @@ def test_pipeline_io_extraction_pattern():
 
 
 def test_pipeline_output_extraction_pattern():
-    """Test the pattern used in Collectra._check_task_io for outputs."""
+    """Test the pattern used in Pipeline._check_task_io for outputs."""
 
     def task_run(input_data: str) -> Optional[List[int]]:
         return [1, 2, 3]

@@ -20,29 +20,31 @@ import os
 import shutil
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from typing import Any
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
-from collectra.pipelines.base import Collectra
+from collectra.pipelines.base import Pipeline
 from collectra.tasks.base import Task
 from collectra.utils import error_msg, processing_msg, success_msg
 
 
-@dataclass(kw_only=True)
-class DataHandler:
+class DataHandler(BaseModel):
     """Abstract base class for workflow data handling operations.
 
     Provides common functionality for saving workflow configurations and
     managing machine learning model artifacts across different storage formats.
 
     Attributes:
-        pipeline (Collectra): The workflow pipeline to save.
+        pipeline (Pipeline): The workflow pipeline to save.
     """
 
-    pipeline: Collectra
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    pipeline: Any
 
     def save(self):
         """Save the workflow configuration and artifacts.
@@ -101,7 +103,6 @@ class DataHandler:
                 f.write("\n")
 
 
-@dataclass(kw_only=True)
 class DirectoryHandler(DataHandler):
     """Handler for saving workflows as directory structures.
 
@@ -180,7 +181,6 @@ class DirectoryHandler(DataHandler):
                 os.remove(old_models[old_model])
 
 
-@dataclass(kw_only=True)
 class ZipHandler(DataHandler):
     """Handler for saving workflows as compressed zip files.
 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from .cli import invoke
 
 if TYPE_CHECKING:
-    from .pipelines.base import Collectra
+    from .pipelines.base import Pipeline
 
 
 def find_pipeline(argv: list[str]) -> tuple[Path, list[str]]:
@@ -31,11 +31,11 @@ def find_pipeline(argv: list[str]) -> tuple[Path, list[str]]:
     raise SystemExit("Missing required option: --pipeline PATH")
 
 
-def resolve_workflow_path(workflow: Path) -> "Collectra":
+def resolve_workflow_path(workflow: Path) -> "Pipeline":
     """Backward-compatible name for loading a pipeline."""
-    from .pipelines.base import Collectra
+    from .pipelines.base import Pipeline
 
-    return Collectra.from_file(workflow)
+    return Pipeline.from_file(workflow)
 
 
 def main(
@@ -48,9 +48,9 @@ def main(
     arguments = list(sys.argv[1:] if argv is None else argv)
     if pipeline_path is None:
         pipeline_path, arguments = find_pipeline(arguments)
-    from .pipelines.base import Collectra
+    from .pipelines.base import Pipeline
 
-    pipeline = Collectra.from_file(pipeline_path)
+    pipeline = Pipeline.from_file(pipeline_path)
     return invoke(pipeline, arguments, name=program_name)
 
 

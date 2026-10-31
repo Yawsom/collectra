@@ -325,7 +325,7 @@ def test_import_and_help_do_not_load_ml_backends():
 
 def test_pipeline_training_persists_model_and_link_outputs(tmp_path, tiny_backend):
     import yaml
-    from collectra import Collectra
+    from collectra import Pipeline
     from collectra.types.base import ArtefactNode
 
     pipeline_dir = tmp_path / "pipeline"
@@ -383,7 +383,7 @@ def test_pipeline_training_persists_model_and_link_outputs(tmp_path, tiny_backen
                 }
             )
         )
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     pipeline.connect()
     for name in ("Pollen", "Spore"):
         node = pipeline.node_manager.resolve_node(name)
@@ -407,7 +407,7 @@ def test_pipeline_training_persists_model_and_link_outputs(tmp_path, tiny_backen
     task._reload()
     assert task.original_model_path == (pipeline_dir / saved).resolve()
     assert (pipeline_dir / Path(saved).with_suffix(".classes.json")).is_file()
-    reloaded = Collectra.from_file(pipeline_file)
+    reloaded = Pipeline.from_file(pipeline_file)
     reloaded.connect()
     classifier = reloaded.node_manager.resolve_node("classifier").get_task()
     image = Image(name="image", data=data_dir / "0.png")

@@ -1,6 +1,5 @@
 import uuid
 from abc import abstractmethod
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -11,7 +10,7 @@ from rich import print
 
 from collectra.cli import command
 
-from ..commons import EntityMixin, Node, NodeStatus
+from ..commons import EntityMixin, Node, NodeStatus, PositionalFields
 from ..utils import (
     change_dir,
     error_msg,
@@ -77,7 +76,7 @@ class ArtefactMeta(type(BaseModel)):
         return bool(stand_in) and issubclass(stand_in(instance), cls)
 
 
-class Artefact(EntityMixin, BaseModel, metaclass=ArtefactMeta):
+class Artefact(PositionalFields, EntityMixin, BaseModel, metaclass=ArtefactMeta):
     model_config = ConfigDict(
         extra="allow",
         validate_assignment=True,
@@ -104,27 +103,6 @@ class Artefact(EntityMixin, BaseModel, metaclass=ArtefactMeta):
     _runtime_fields: ClassVar[frozenset[str]] = frozenset(
         {"source_file", "raw_width", "raw_height", "source_parent"}
     )
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if args:
-            names = [
-                field
-                for field in type(self).model_fields
-                if field not in self._runtime_fields
-            ]
-            if len(args) > len(names):
-                raise TypeError(
-                    f"{type(self).__name__} takes at most {len(names)} positional "
-                    f"arguments but {len(args)} were given"
-                )
-            for field_name, value in zip(names, args):
-                if field_name in kwargs:
-                    raise TypeError(
-                        f"{type(self).__name__} got multiple values for "
-                        f"argument {field_name!r}"
-                    )
-                kwargs[field_name] = value
-        super().__init__(**kwargs)
 
     @field_validator("parents", "embeddings", mode="before")
     @classmethod
@@ -239,17 +217,15 @@ class Artefact(EntityMixin, BaseModel, metaclass=ArtefactMeta):
         )
 
 
-@dataclass
 class ArtefactNode(Node):
 
-    items: dict[str, Artefact] = field(default_factory=dict)
-    ensemble_items: dict[str, Artefact] = field(default_factory=dict)
-    types: set[type] = field(default_factory=set)
+    items: dict[str, Artefact] = Field(default_factory=dict)
+    ensemble_items: dict[str, Artefact] = Field(default_factory=dict)
+    types: set[type] = Field(default_factory=set)
     skip_type_check: bool = False
     ensemble: bool = False
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
+    def model_post_init(self, __context: Any) -> None:
         self.status = NodeStatus.READY if self.items else NodeStatus.NOT_READY
 
     def add_item(self, item: Artefact) -> None:

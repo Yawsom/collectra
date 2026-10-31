@@ -11,7 +11,7 @@ import yaml
 from PIL import Image as PILImage
 
 from collectra import (
-    Collectra,
+    Pipeline,
     Image,
     ImageCrop,
     ImageSegmentation,
@@ -476,7 +476,7 @@ def test_pipeline_training_export_without_model_installation(tmp_path, input_kin
             }
         )
     )
-    pipeline = Collectra(
+    pipeline = Pipeline(
         "SAM",
         "collectra",
         "1",

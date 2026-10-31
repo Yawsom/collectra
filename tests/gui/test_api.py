@@ -38,9 +38,9 @@ class TestApiInit:
         pipeline_path = (
             Path(__file__).parents[1] / "data" / "collectrapipeline" / "pipeline.yaml"
         )
-        from collectra.pipelines.base import Collectra
+        from collectra.pipelines.base import Pipeline
 
-        pipeline = Collectra.from_file(pipeline_path)
+        pipeline = Pipeline.from_file(pipeline_path)
         backend = GUIBackend(pipeline)
 
         result = backend.get_pipeline_graph()

@@ -89,9 +89,9 @@ class TestGetTableData:
         from pathlib import Path
 
         from collectra.gui.backend import GUIBackend
-        from collectra.pipelines.base import Collectra
+        from collectra.pipelines.base import Pipeline
 
-        pipeline = Collectra.from_file(
+        pipeline = Pipeline.from_file(
             Path(__file__).parents[1] / "data" / "collectrapipeline" / "pipeline.yaml"
         )
 

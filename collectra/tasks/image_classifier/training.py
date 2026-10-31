@@ -6,7 +6,9 @@ import math
 import os
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from pydantic import BaseModel
+
+from collectra.commons import PositionalFields
 from pathlib import Path
 from rich.console import Console
 from rich.progress import (
@@ -82,8 +84,7 @@ logger = get_logger(__name__)
 console = Console()
 
 
-@dataclass
-class ClassificationTrainResult:
+class ClassificationTrainResult(PositionalFields, BaseModel):
     save_dir: Path
     results_dict: dict
 

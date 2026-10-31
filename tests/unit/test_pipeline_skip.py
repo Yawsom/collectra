@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from collectra import Collectra
+from collectra import Pipeline
 from collectra.cli import invoke
 from collectra.tasks.base import Task
 from collectra.types.images import Image
@@ -105,7 +105,7 @@ def test_force_applies_to_a_single_task_run(tmp_path, done, monkeypatch):
 def test_force_is_a_run_option_not_a_task_override(tmp_path, done, monkeypatch):
     seen = []
     monkeypatch.setattr(
-        Collectra,
+        Pipeline,
         "_apply_task_run_overrides",
         lambda self, task, overrides: seen.append(dict(overrides)),
     )

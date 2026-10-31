@@ -11,7 +11,7 @@ import pytest
 from collectra.cli import command, group, invoke
 from collectra.main import find_pipeline
 from collectra.main import main
-from collectra.pipelines.base import Collectra
+from collectra.pipelines.base import Pipeline
 
 
 class Detector:
@@ -216,7 +216,7 @@ def test_actual_entry_point_root_help(tmp_path, capsys):
 def test_pipeline_run_accepts_tiff_inputs(
     tmp_path, monkeypatch, suffix, directory_input
 ):
-    pipeline = Collectra.from_file(write_empty_pipeline(tmp_path))
+    pipeline = Pipeline.from_file(write_empty_pipeline(tmp_path))
     image = tmp_path / f"multiview{suffix}"
     image.touch()
     calls = []
@@ -228,7 +228,7 @@ def test_pipeline_run_accepts_tiff_inputs(
 
 
 def test_pipeline_run_warns_when_no_inputs_match(tmp_path, monkeypatch, capsys):
-    pipeline = Collectra.from_file(write_empty_pipeline(tmp_path))
+    pipeline = Pipeline.from_file(write_empty_pipeline(tmp_path))
     unsupported = tmp_path / "unsupported.txt"
     unsupported.touch()
     calls = []
@@ -255,7 +255,7 @@ def test_installed_pipeline_launcher_delegates_to_main(tmp_path, monkeypatch, sp
         monkeypatch.setattr(sys, "executable", str(interpreter))
         tmp_path = directory
     pipeline_file = write_empty_pipeline(tmp_path)
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     bin_dir = tmp_path / "bin"
     pipeline.cli_install("test-pipeline", bin_dir=bin_dir)
     launcher = bin_dir / "test-pipeline"
@@ -306,7 +306,7 @@ def test_pipeline_exposes_commands_for_artefact_types(tmp_path, capsys):
         "  type: collectra.ImageCrop\n"
         "  data: source.jpg\n"
     )
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
 
     artefact_help = help_for(pipeline, ["artefact", "--help"], capsys)
     image_help = help_for(pipeline, ["artefact", "Palynomorph", "--help"], capsys)
@@ -338,7 +338,7 @@ def test_image_artefact_extract_command(tmp_path):
         "  type: collectra.Image\n"
         "  data: source.jpg\n"
     )
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     output = tmp_path / "output"
 
     invoke(
@@ -376,7 +376,7 @@ def test_artefact_evaluate_command_uses_selected_node(tmp_path, capsys):
     )
     (predictions / "results.yaml").write_text(result)
     (ground_truth / "results.yaml").write_text(result)
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     csv_output = tmp_path / "reports" / "evaluation.csv"
 
     invoke(
@@ -472,8 +472,8 @@ def test_pipeline_help_with_model_tasks_does_not_import_backends(tmp_path):
 
 
 def test_training_is_owned_by_concrete_tasks():
-    assert not hasattr(Collectra, "train")
-    assert not hasattr(Collectra, "save_train")
+    assert not hasattr(Pipeline, "train")
+    assert not hasattr(Pipeline, "save_train")
     assert "MachineLearningTask" not in collectra.__all__
     assert not hasattr(collectra, "MachineLearningTask")
 

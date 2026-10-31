@@ -1,13 +1,13 @@
 Python API
 ==========
 
-Load a YAML pipeline with ``Collectra.from_file`` and run it from Python:
+Load a YAML pipeline with ``Pipeline.from_file`` and run it from Python:
 
 .. code-block:: python
 
-    from collectra import Collectra
+    from collectra import Pipeline
 
-    pipeline = Collectra.from_file("pipeline.yaml")
+    pipeline = Pipeline.from_file("pipeline.yaml")
     pipeline.cli_run(["images"], output="results")
 
 ``cli_run`` accepts file and directory inputs, resolving them in the same way

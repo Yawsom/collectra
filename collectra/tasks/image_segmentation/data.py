@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from pydantic import BaseModel
+
+from collectra.commons import PositionalFields
 from pathlib import Path
 
 import numpy as np
@@ -58,8 +60,7 @@ def encode_rle(mask: np.ndarray):
     return {"size": list(mask.shape), "counts": counts}
 
 
-@dataclass
-class SegmentationSample:
+class SegmentationSample(PositionalFields, BaseModel):
     image: Image
     instances: list[ImageSegmentation]
 

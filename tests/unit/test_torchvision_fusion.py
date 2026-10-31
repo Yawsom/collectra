@@ -138,7 +138,7 @@ def test_yaml_fusion_training_tiff_inference_and_reload(tmp_path, monkeypatch):
     import torch
     from types import SimpleNamespace
     from torchvision import models, transforms
-    from collectra import Collectra
+    from collectra import Pipeline
 
     class TinyClassifier(torch.nn.Module):
         def __init__(self):
@@ -167,7 +167,7 @@ def test_yaml_fusion_training_tiff_inference_and_reload(tmp_path, monkeypatch):
     pipeline.write_text(
         'collectra_pipeline_metadata:\n  name: Fusion\n  ext: collectra\n  version: "1"\nclassifier:\n  type: collectra.ImageClassifierTorchvision\n  input: image\n  output: [a, b]\n  model: resnet18\n  fusion: true\n'
     )
-    workflow = Collectra.from_file(pipeline)
+    workflow = Pipeline.from_file(pipeline)
     workflow.connect()
     task = workflow.node_manager.resolve_node("classifier").get_task()
     assert task.fusion is True

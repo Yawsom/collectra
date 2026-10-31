@@ -22,7 +22,7 @@ def test_gui_and_pipeline_discovery_with_ml_backends_unavailable():
         import cappa
         import yaml
         from PIL import Image as PILImage
-        from collectra import Collectra
+        from collectra import Pipeline
         from collectra.cli import invoke
         from collectra.gui.backend import GUIBackend
         from collectra.pipelines.ensemble import weighted_boxes_fusion
@@ -48,7 +48,7 @@ def test_gui_and_pipeline_discovery_with_ml_backends_unavailable():
                 config[name] = {'type': 'collectra.' + kind, 'model': 'unused.pt'}
             pipeline_path = root / 'pipeline.yaml'
             pipeline_path.write_text(yaml.safe_dump(config))
-            pipeline = Collectra.from_file(pipeline_path)
+            pipeline = Pipeline.from_file(pipeline_path)
             pipeline._ensure_workflow_connected()
             from collectra.tasks.llms import LLM
             try:

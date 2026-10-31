@@ -8,12 +8,12 @@ Classes:
     Text: Basic text container with content and optional path metadata
 """
 
-from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import BaseModel
 
-@dataclass(kw_only=True)
-class Text:
+
+class Text(BaseModel):
     """Basic text container for handling textual content in workflows.
 
     Provides a simple data structure for storing text content along with
@@ -25,15 +25,17 @@ class Text:
     """
 
     content: str
-    path: Path
+    path: Path | None = None
 
-    def __init__(self, content: str):
+    def __init__(self, content: str | None = None, **kwargs):
         """Initialize a Text instance with content.
 
         Args:
             content (str): The text content to store.
         """
-        self.content = content
+        if content is not None:
+            kwargs["content"] = content
+        super().__init__(**kwargs)
 
     def __str__(self):
         """Return the text content as a string.

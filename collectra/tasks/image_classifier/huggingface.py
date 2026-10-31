@@ -5,9 +5,11 @@ from __future__ import annotations
 import copy
 import json
 import tempfile
-from dataclasses import dataclass
+from typing import Annotated, Any
+from pydantic import BaseModel, ConfigDict
+
+from collectra.commons import PositionalFields
 from pathlib import Path
-from typing import Annotated
 
 from cappa import Arg
 
@@ -25,11 +27,12 @@ from .training import (
 __all__ = ["ImageClassifierHuggingFace"]
 
 
-@dataclass
-class _ProcessorTransform:
+class _ProcessorTransform(PositionalFields, BaseModel):
     """A picklable per-image transform for DataLoader worker processes."""
 
-    processor: object
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    processor: Any
     fliplr: float = 0.0
 
     def __call__(self, image):

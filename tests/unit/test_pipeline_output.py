@@ -11,17 +11,17 @@ from pathlib import Path
 
 import yaml
 
-from collectra import Collectra
+from collectra import Pipeline
 
 
-def build_pipeline(pipeline: dict) -> Collectra:
+def build_pipeline(pipeline: dict) -> Pipeline:
     """Helper function to build a Collectra pipeline from a dict."""
     metadata: dict = pipeline.pop("collectra_pipeline_metadata")
     name = metadata["name"]
     ext = metadata["ext"]
     version = metadata["version"]
     path = pipeline.pop("pipeline_path", "")
-    return Collectra(name, ext, version, path=path, **pipeline)
+    return Pipeline(name, ext, version, path=path, **pipeline)
 
 
 def test_output_with_image_file(pipeline, debug, tmpdir, raw_img_path):

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel
+
+from collectra.commons import PositionalFields
 from pathlib import Path
 from typing import Annotated
 
@@ -62,8 +64,7 @@ def _target_tiff_pixels(image, *, tiff_maxworkers: int | None = None):
     return np.rot90(pixels, k=target.orientation.to_degree() // 90, axes=(0, 1))
 
 
-@dataclass
-class _NormalizeClassifierPixels:
+class _NormalizeClassifierPixels(PositionalFields, BaseModel):
     mean: list[float]
     std: list[float]
 

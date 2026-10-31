@@ -305,7 +305,7 @@ def test_import_and_help_are_lazy():
 
 def test_pipeline_save_and_reload_after_log_cleanup(tmp_path, local_model):
     import yaml
-    from collectra import Collectra
+    from collectra import Pipeline
     from collectra.types.base import ArtefactNode
     from collectra.utils import change_dir
 
@@ -361,7 +361,7 @@ def test_pipeline_save_and_reload_after_log_cleanup(tmp_path, local_model):
             }
         )
     )
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     pipeline.connect()
     for name in ("Pollen", "Spore"):
         node = pipeline.node_manager.resolve_node(name)
@@ -384,7 +384,7 @@ def test_pipeline_save_and_reload_after_log_cleanup(tmp_path, local_model):
     assert (pipeline_dir / saved).is_file()
     assert (pipeline_dir / Path(saved).with_suffix(".classes.json")).is_file()
     task._reload()
-    reloaded = Collectra.from_file(pipeline_file)
+    reloaded = Pipeline.from_file(pipeline_file)
     reloaded.connect()
     classifier = reloaded.node_manager.resolve_node("classifier").get_task()
     image = Image(name="image", data=data_dir / "0.png")

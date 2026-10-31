@@ -10,7 +10,6 @@ Classes:
 __all__ = ["Task", "TaskNode"]
 
 import re
-from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 from typing import Annotated, Any, Generic
@@ -18,11 +17,18 @@ from typing import Annotated, Any, Generic
 from cappa import Arg
 from pydantic import BaseModel, ConfigDict, Field
 
-from collectra.commons import EntityMixin, Node, NodeStatus, T, TaskContext
+from collectra.commons import (
+    EntityMixin,
+    LenientAttributes,
+    Node,
+    NodeStatus,
+    T,
+    TaskContext,
+)
 from collectra.cli import command
 
 
-class Task(EntityMixin, BaseModel, Generic[T]):
+class Task(LenientAttributes, EntityMixin, BaseModel, Generic[T]):
     """Abstract base class for all tasks in Collectra workflows.
 
     Defines the common interface and behavior that all tasks must implement.
@@ -52,22 +58,6 @@ class Task(EntityMixin, BaseModel, Generic[T]):
 
     def __init__(self, name: str, **kwargs) -> None:
         super().__init__(name=name, **kwargs)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name not in type(self).model_fields and hasattr(type(self), name):
-            # Shadowing a method or property: plain Python semantics, not a field.
-            object.__setattr__(self, name, value)
-            return
-        # Validated assignment rebuilds ``__dict__`` from the declared fields,
-        # which would drop cached properties and private state held there.
-        lazy = {
-            key: held
-            for key, held in self.__dict__.items()
-            if key not in type(self).model_fields
-        }
-        super().__setattr__(name, value)
-        for key, held in lazy.items():
-            self.__dict__.setdefault(key, held)
 
     def attributes_to_ignore(self) -> set:
         return super().attributes_to_ignore() | {"pipeline", "context"}
@@ -214,7 +204,6 @@ class Task(EntityMixin, BaseModel, Generic[T]):
         )
 
 
-@dataclass
 class TaskNode(Node):
 
     task: Task

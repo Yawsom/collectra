@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image as PilImage
 
-from collectra import Collectra
+from collectra import Pipeline
 from collectra.displays.preview import open_preview
 from collectra.types.images import Image, ImageCrop, image_size
 
@@ -135,7 +135,7 @@ def test_previews_decode_reduced_jpegs_in_the_displayed_orientation(tmp_path):
 def build(tmp_path):
     from tests.unit.test_pipeline_stages import MODULE
 
-    return Collectra(
+    return Pipeline(
         "Exif",
         "exf",
         "0.1.0",

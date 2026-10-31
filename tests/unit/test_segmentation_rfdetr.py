@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PIL import Image as PILImage
 
-from collectra import Collectra, Image, ImageCrop, ImageSegmentation, ImageSegmentationRFDETR
+from collectra import Pipeline, Image, ImageCrop, ImageSegmentation, ImageSegmentationRFDETR
 from collectra.cli import invoke
 from collectra.tasks.image_segmentation import rfdetr
 from collectra.tasks.image_segmentation.data import SegmentationSample
@@ -148,7 +148,7 @@ def pipeline(tmp_path):
         "collectra_pipeline_metadata": {"name": "Segments", "ext": "htr", "version": "1"},
         "segment": {"type": "collectra.ImageSegmentationRFDETR", "input": "page", "output": "text_region"},
     }))
-    return Collectra.from_file(path)
+    return Pipeline.from_file(path)
 
 
 def fake_training(monkeypatch):

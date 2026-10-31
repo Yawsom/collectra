@@ -285,9 +285,9 @@ def temp_parent_folder_with_subfolders(tmp_path, sample_yaml_data):
 def backend_with_extension(tmp_path):
     """Pre-configured GUIBackend with extension set."""
     from collectra.gui.backend import GUIBackend
-    from collectra.pipelines.base import Collectra
+    from collectra.pipelines.base import Pipeline
 
-    return GUIBackend(Collectra("test", "collectra", "1.0", path=tmp_path))
+    return GUIBackend(Pipeline("test", "collectra", "1.0", path=tmp_path))
 
 
 @pytest.fixture
@@ -423,9 +423,9 @@ def temp_grapto_folder_with_png(tmp_path, sample_yaml_data):
 def backend_with_grapto_extension(tmp_path):
     """Pre-configured GUIBackend with grapto extension set."""
     from collectra.gui.backend import GUIBackend
-    from collectra.pipelines.base import Collectra
+    from collectra.pipelines.base import Pipeline
 
-    return GUIBackend(Collectra("test", "grapto", "1.0", path=tmp_path))
+    return GUIBackend(Pipeline("test", "grapto", "1.0", path=tmp_path))
 
 
 @pytest.fixture

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from collectra import Collectra
+from collectra import Pipeline
 from collectra.tasks.base import Task
 from collectra.types.images import Image
 from collectra.types.texts import Text
@@ -75,7 +75,7 @@ def build(tmp_path, batch_size=2, with_tail=False, **shout):
             "input": ["shouted"],
             "output": ["counted"],
         }
-    return Collectra("Staged", "stg", "0.1.0", path=str(tmp_path), **config)
+    return Pipeline("Staged", "stg", "0.1.0", path=str(tmp_path), **config)
 
 
 @pytest.fixture

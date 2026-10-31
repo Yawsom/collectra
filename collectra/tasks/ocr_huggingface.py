@@ -13,10 +13,12 @@ import json
 import random
 import shutil
 import time
-from dataclasses import dataclass
+from typing import Annotated
+from pydantic import BaseModel
+
+from collectra.commons import PositionalFields
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
 
 from cappa import Arg
 from PIL import Image as PILImage
@@ -71,8 +73,7 @@ def _rgb(image: PILImage.Image) -> PILImage.Image:
     return image.convert("RGB")
 
 
-@dataclass
-class OCRSample:
+class OCRSample(PositionalFields, BaseModel):
     image: Image
     text: str
     partition: str = ""

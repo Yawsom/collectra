@@ -440,7 +440,7 @@ def test_rotate_crop_via_link_leaves_parent_and_siblings(backend):
 
 
 def test_unannotated_detector_output_has_crop_type(tmp_path):
-    from collectra import Collectra
+    from collectra import Pipeline
 
     pipeline_file = tmp_path / "pipeline.yaml"
     pipeline_file.write_text(
@@ -450,7 +450,7 @@ def test_unannotated_detector_output_has_crop_type(tmp_path):
         "  input: image\n"
         "  output: sandglass\n"
     )
-    graph = Collectra.from_file(pipeline_file).gui_graph()
+    graph = Pipeline.from_file(pipeline_file).gui_graph()
     nodes = {node["id"]: node for node in graph["nodes"]}
     assert nodes["sandglass"]["detail"] == "collectra.ImageCrop"
     assert nodes["image"]["detail"] == "collectra.Image"

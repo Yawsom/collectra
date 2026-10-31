@@ -1,7 +1,10 @@
 __all__ = ["Evaluator"]
 
 import csv
-from dataclasses import dataclass
+from typing import Any, ClassVar
+from pydantic import BaseModel, ConfigDict, Field
+
+from collectra.commons import PositionalFields
 from pathlib import Path
 
 import yaml
@@ -14,25 +17,30 @@ from ..utils import change_dir
 logger = get_logger(__name__)
 
 
-@dataclass
-class FileEvaluationResult:
+class FileEvaluationResult(PositionalFields, BaseModel):
     """Results for a single file pair evaluation."""
 
     filename: str
     label_metrics: dict[str, dict]
 
 
-@dataclass
-class EvaluationReport:
+class EvaluationReport(PositionalFields, BaseModel):
     """Complete evaluation report across all files."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     file_results: list[FileEvaluationResult]
     aggregate: dict
     threshold: float
+    # Rich tables built from ``aggregate`` for display; not part of the data.
+    aggregate_tables: list = Field(default_factory=list, exclude=True, repr=False)
+    tables: list = Field(default_factory=list, exclude=True, repr=False)
 
-    def __post_init__(self):
-        self.aggregate_tables = []
-        self.tables = []
+    _runtime_fields: ClassVar[frozenset[str]] = frozenset(
+        {"aggregate_tables", "tables"}
+    )
+
+    def model_post_init(self, __context: Any) -> None:
         for data_type, metrics in self.aggregate.items():
             """Turn the aggregate dict into a rich Table for display."""
             table = Table(title=f"Aggregate Evaluation Metrics for {data_type}")

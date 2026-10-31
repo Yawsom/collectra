@@ -248,9 +248,9 @@ The Python equivalent is:
 
 .. code-block:: python
 
-    from collectra import Collectra
+    from collectra import Pipeline
 
-    pipeline = Collectra.from_file("pipeline.yaml")
+    pipeline = Pipeline.from_file("pipeline.yaml")
     pipeline.launch_gui("results/page001.collectra", debug=True)
 
 Custom displays

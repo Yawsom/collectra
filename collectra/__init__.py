@@ -10,7 +10,8 @@ _EXPORTS = {
     "NodeStatus": "collectra.commons.base",
     "TaskContext": "collectra.commons.base",
     "T": "collectra.commons.base",
-    "Collectra": "collectra.pipelines.base",
+    "Pipeline": "collectra.pipelines.base",
+    "Collectra": "collectra.pipelines.base",  # the former name of Pipeline
     "Task": "collectra.tasks.base",
     "TaskNode": "collectra.tasks.base",
     "YOLOTask": "collectra.tasks.machine_learning.yolo",

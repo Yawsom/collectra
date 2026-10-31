@@ -46,9 +46,9 @@ class Repeat(Task):
 
 
 def pipeline(tmp_path, **tasks):
-    from collectra import Collectra
+    from collectra import Pipeline
 
-    return Collectra("Ids", "ids", "0.1.0", path=str(tmp_path), **tasks)
+    return Pipeline("Ids", "ids", "0.1.0", path=str(tmp_path), **tasks)
 
 
 def results(tmp_path, name="a"):

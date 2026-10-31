@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel
+
+from collectra.commons import PositionalFields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -25,8 +27,7 @@ logger = get_logger(__name__)
 __all__ = ["ObjectDetectionDETR", "DetectionTrainResult"]
 
 
-@dataclass
-class DetectionTrainResult:
+class DetectionTrainResult(PositionalFields, BaseModel):
     save_dir: Path
     results_dict: dict
 

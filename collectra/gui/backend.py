@@ -24,7 +24,7 @@ from .scss_theme import compile_theme
 from .data_display import CollectraAnnotationNode, CollectraGraph, NodeDisplayValue
 
 if TYPE_CHECKING:
-    from collectra.pipelines.base import Collectra
+    from collectra.pipelines.base import Pipeline
 
 
 class ImageFormat(enum.Enum):
@@ -46,7 +46,7 @@ class GUIBackend:
         window.pywebview.api.methodName(args)
     """
 
-    def __init__(self, pipeline: "Collectra", inputs=(), max_pixels: int = 4096):
+    def __init__(self, pipeline: "Pipeline", inputs=(), max_pixels: int = 4096):
         """
         Initialize the API instance.
 
@@ -2065,7 +2065,7 @@ def get_resource_path(relative_path: str) -> str:
 
 
 def start(
-    pipeline: "Collectra",
+    pipeline: "Pipeline",
     debug: bool = False,
     inputs=(),
     max_pixels: int = 4096,

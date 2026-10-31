@@ -5,14 +5,14 @@ import subprocess
 import cappa
 import pytest
 
-from collectra import Collectra
+from collectra import Pipeline
 from collectra.cli import command, invoke
 
 
 def pipeline(tmp_path):
     folder = tmp_path / "My Pipeline.collectra"
     folder.mkdir()
-    return Collectra("Demo", "dmo", "0.1.0", path=str(folder)), folder
+    return Pipeline("Demo", "dmo", "0.1.0", path=str(folder)), folder
 
 
 def root_help(app, capsys):

@@ -163,3 +163,70 @@ it('renders only the selected instance lineage and updates when the selected ins
     expect(lists.parentsList.innerHTML).toContain('region-b');
     expect(lists.parentsList.innerHTML).not.toContain('region-a');
 });
+
+// ── per-artefact lineage must be ready as soon as a page opens ──────────────────────────
+
+describe('the page data behind the lineage lists', () => {
+    const source = between('function applyPageNodeData(', '\n        }\n') + '\n        }';
+
+    function load(initial = {}) {
+        const context = {
+            pageNodeTypes: new Map(), pageCropLabels: new Set(), pageNodeIds: new Map(),
+            pageNodeParents: null, ...initial,
+        };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+        return context;
+    }
+
+    const result = {
+        success: true,
+        node_types: {crop: 'collectra.ImageCrop'},
+        crop_labels: ['crop'],
+        node_ids: {crop: ['region-a', 'region-b']},
+        node_parents: {page: [], 'region-a': ['page'], 'region-b': ['page'], 'line-a1': ['region-a']},
+    };
+
+    it('records the types, crop labels, ids and each artefact\'s own parents together', () => {
+        const ctx = load();
+        ctx.applyPageNodeData(result);
+        expect(ctx.pageNodeTypes.get('crop')).toBe('collectra.ImageCrop');
+        expect(ctx.pageCropLabels.has('crop')).toBe(true);
+        expect(ctx.pageNodeIds.get('crop')).toEqual(['region-a', 'region-b']);
+        expect(ctx.pageNodeParents.get('line-a1')).toEqual(['region-a']);
+    });
+
+    it('replaces the previous page\'s parents rather than keeping them', () => {
+        const ctx = load({pageNodeParents: new Map([['old-page-node', ['x']]])});
+        ctx.applyPageNodeData(result);
+        expect(ctx.pageNodeParents.has('old-page-node')).toBe(false);
+    });
+
+    it('forgets the previous page when the new page has no parent data or fails', () => {
+        const ctx = load({pageNodeParents: new Map([['old', []]]), pageNodeIds: new Map([['old', ['o']]])});
+        ctx.applyPageNodeData({success: false, error: 'nope'});
+        expect(ctx.pageNodeParents).toBe(null);
+        expect(ctx.pageNodeIds.size).toBe(0);
+        expect(ctx.pageNodeTypes.size).toBe(0);
+        expect(ctx.pageCropLabels.size).toBe(0);
+    });
+
+    it('gives only the selected artefact\'s own lineage right after the page opens', () => {
+        const ctx = load();
+        ctx.applyPageNodeData(result);
+        const targets = (id, direction) =>
+            lineageTargets(id, direction, nodes, edges, ctx.pageNodeIds, ctx.pageNodeParents, (x) => x);
+        expect(targets('region-a', 'descendants')).toEqual(['line-a1']);
+        expect(targets('region-b', 'descendants')).toEqual([]);   // not the sibling's lines
+        expect(targets('line-a1', 'ancestors')).toEqual(['region-a', 'page']);
+    });
+
+    it('opening a page and refreshing it both use it, so neither can be missed', () => {
+        const opening = between('const activeResult = await window.pywebview.api.get_active_node_ids(index);', 'populateTabs(lastDagNodes);');
+        const refreshing = between('async function refreshActiveNodeIds', 'populateTabs(lastDagNodes);');
+        expect(opening).toContain('applyPageNodeData(activeResult)');
+        expect(refreshing).toContain('applyPageNodeData(activeResult)');
+        expect(opening).not.toContain('pageNodeIds = new Map');
+        expect(refreshing).not.toContain('pageNodeIds = new Map');
+    });
+});

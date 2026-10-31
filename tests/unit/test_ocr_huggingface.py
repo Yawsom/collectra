@@ -135,10 +135,10 @@ def make_pipeline(tmp_path, model):
 
 
 def test_train_exports_saves_and_reloads(tiny_model, tmp_path):
-    from collectra import Collectra
+    from collectra import Pipeline
 
     pipeline_file, data_dir = make_pipeline(tmp_path, tiny_model)
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     pipeline.connect()
     task = pipeline.node_manager.resolve_node("line_reader").get_task()
     output = tmp_path / "run"
@@ -167,7 +167,7 @@ def test_train_exports_saves_and_reloads(tiny_model, tmp_path):
     assert destination == pipeline_file.parent / saved
     assert (destination / "config.json").is_file()
 
-    reloaded = Collectra.from_file(pipeline_file)
+    reloaded = Pipeline.from_file(pipeline_file)
     reloaded.connect()
     reader = reloaded.node_manager.resolve_node("line_reader").get_task()
     texts = reader.run(Image(name="line_image", data=data_dir / "0.png"))
@@ -175,10 +175,10 @@ def test_train_exports_saves_and_reloads(tiny_model, tmp_path):
 
 
 def test_reuse_data_requires_output(tiny_model, tmp_path):
-    from collectra import Collectra
+    from collectra import Pipeline
 
     pipeline_file, data_dir = make_pipeline(tmp_path, tiny_model)
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     pipeline.connect()
     task = pipeline.node_manager.resolve_node("line_reader").get_task()
     with pytest.raises(ValueError, match="--reuse-data requires --output"):
@@ -189,10 +189,10 @@ def test_lora_adapters_are_merged_into_saved_model(tiny_model, tmp_path):
     pytest.importorskip("peft")
     from safetensors import safe_open
 
-    from collectra import Collectra
+    from collectra import Pipeline
 
     pipeline_file, data_dir = make_pipeline(tmp_path, tiny_model)
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     pipeline.connect()
     task = pipeline.node_manager.resolve_node("line_reader").get_task()
     destination = task.train(
@@ -214,7 +214,7 @@ def test_wandb_logs_epoch_metrics(tiny_model, tmp_path, monkeypatch):
     import sys
     import types
 
-    from collectra import Collectra
+    from collectra import Pipeline
 
     class FakeRun:
         def __init__(self, **kwargs):
@@ -236,7 +236,7 @@ def test_wandb_logs_epoch_metrics(tiny_model, tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "wandb", fake)
 
     pipeline_file, data_dir = make_pipeline(tmp_path, tiny_model)
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     pipeline.connect()
     task = pipeline.node_manager.resolve_node("line_reader").get_task()
     task.train(

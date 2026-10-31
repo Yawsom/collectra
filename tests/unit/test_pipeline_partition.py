@@ -5,7 +5,7 @@ import pytest
 import yaml
 
 from collectra.cli import invoke
-from collectra.pipelines.base import Collectra
+from collectra.pipelines.base import Pipeline
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def dataset(tmp_path):
                 }
             )
         )
-    return Collectra.from_file(pipeline_path), parent
+    return Pipeline.from_file(pipeline_path), parent
 
 
 def assignments(parent):

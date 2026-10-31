@@ -3,13 +3,13 @@
 import shutil
 from pathlib import Path
 
-from collectra import Collectra
+from collectra import Pipeline
 
 
-def build_pipeline(pipeline: dict) -> Collectra:
+def build_pipeline(pipeline: dict) -> Pipeline:
     metadata: dict = pipeline.pop("collectra_pipeline_metadata")
     path = pipeline.pop("pipeline_path", "")
-    return Collectra(
+    return Pipeline(
         metadata["name"], metadata["ext"], metadata["version"], path=path, **pipeline
     )
 

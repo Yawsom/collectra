@@ -3249,9 +3249,7 @@
                 // built; setActive then re-applies dimming to the freshly
                 // rebuilt rows.
                 const activeResult = await window.pywebview.api.get_active_node_ids(index);
-                pageNodeTypes = new Map(Object.entries(activeResult.node_types || {}));
-                pageCropLabels = new Set(activeResult.crop_labels || []);
-                pageNodeIds = new Map(Object.entries(activeResult.node_ids || {}));
+                applyPageNodeData(activeResult);
                 populateTabs(lastDagNodes);
                 setActive(activeResult.success ? activeResult.active_ids : null);
 
@@ -4094,7 +4092,21 @@
         // instances per page (e.g. multiple detected objects), all sharing
         // that label.
         let pageNodeIds = new Map();
+        // artefact id -> its own direct parent ids, for the currently loaded
+        // page. It is what makes Ancestors/Descendants follow the selected
+        // artefact alone; without it they fall back to the pipeline's
+        // category-level graph (every instance of every up/downstream label).
         let pageNodeParents = null;
+
+        // Applies one get_active_node_ids result. Both opening a page and
+        // refreshing it go through here, so the per-artefact parents can never
+        // be left stale from the previous page or missing after a page opens.
+        function applyPageNodeData(result) {
+            pageNodeTypes = new Map(Object.entries(result.node_types || {}));
+            pageCropLabels = new Set(result.crop_labels || []);
+            pageNodeIds = new Map(Object.entries(result.node_ids || {}));
+            pageNodeParents = result.node_parents ? new Map(Object.entries(result.node_parents)) : null;
+        }
 
         // Same data loadCollectraFolder populates on page switch — call after
         // create/delete/rename too, or the DAG/Artefacts lists go stale.
@@ -4108,10 +4120,7 @@
                 return; // keep what we had: an emptied record would leave tabs nameless and buttons greyed out
             }
             if (!activeResult || !activeResult.success) return;
-            pageNodeTypes = new Map(Object.entries(activeResult.node_types || {}));
-            pageCropLabels = new Set(activeResult.crop_labels || []);
-            pageNodeIds = new Map(Object.entries(activeResult.node_ids || {}));
-            pageNodeParents = activeResult.node_parents ? new Map(Object.entries(activeResult.node_parents)) : null;
+            applyPageNodeData(activeResult);
             populateTabs(lastDagNodes);
             setActive(activeResult.active_ids);
         }

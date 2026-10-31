@@ -8,7 +8,7 @@ import yaml
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
-from collectra import Collectra
+from collectra import Pipeline
 from collectra.tasks.base import Task
 from collectra.tasks.text_output import TextOutputTask
 from collectra.types.images import Image
@@ -39,7 +39,7 @@ class Shout(Task):
 
 
 def pipeline(tmp_path, **tasks):
-    return Collectra("Out", "out", "0.1.0", path=str(tmp_path), **tasks)
+    return Pipeline("Out", "out", "0.1.0", path=str(tmp_path), **tasks)
 
 
 def folder(tmp_path, name="a"):

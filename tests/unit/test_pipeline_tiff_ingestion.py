@@ -5,7 +5,7 @@ import pytest
 import tifffile
 from PIL import Image as PILImage
 
-from collectra import Collectra
+from collectra import Pipeline
 from collectra.types.images import read_tiff_channels
 
 
@@ -21,7 +21,7 @@ def test_ingestion_preserves_tiff_source_and_copy(tmp_path, suffix, axes):
         metadata={"axes": axes},
     )
     original = source.read_bytes()
-    pipeline = Collectra("test", "collectra", "1", path=tmp_path)
+    pipeline = Pipeline("test", "collectra", "1", path=tmp_path)
 
     folder = pipeline._handle_image_file(source, tmp_path / "output")
     copied = folder / source.name
@@ -43,7 +43,7 @@ def test_ingestion_keeps_raster_copy_identical_including_exif(tmp_path):
     exif[270] = "Original metadata"
     PILImage.new("RGB", (16, 16)).save(source, exif=exif)
     original = source.read_bytes()
-    pipeline = Collectra("test", "collectra", "1", path=tmp_path)
+    pipeline = Pipeline("test", "collectra", "1", path=tmp_path)
 
     folder = pipeline._handle_image_file(source, tmp_path / "output")
 

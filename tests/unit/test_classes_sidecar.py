@@ -27,7 +27,7 @@ try:  # pragma: no cover - environment guard
 except Exception:  # pragma: no cover - environment guard
     sys.modules["cv2"] = MagicMock()
 
-from collectra.pipelines.base import Collectra  # noqa: E402
+from collectra.pipelines.base import Pipeline  # noqa: E402
 from collectra.tasks.base import Task  # noqa: E402
 from collectra.tasks.machine_learning.training import save_training_result  # noqa: E402
 from collectra.tasks.object_detection.rfdetr import (  # noqa: E402
@@ -39,10 +39,8 @@ from collectra.tasks.object_detection.rfdetr import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _make_pipeline(task_name: str, current_model: str = "") -> Collectra:
-    pipeline = Collectra.__new__(Collectra)
-    pipeline.data = {task_name: {"model": current_model}}
-    return pipeline
+def _make_pipeline(task_name: str, current_model: str = "") -> Pipeline:
+    return Pipeline("sidecar", "scr", "1", **{task_name: {"model": current_model}})
 
 
 def test_save_train_copies_classes_sidecar(tmp_path: Path, monkeypatch):

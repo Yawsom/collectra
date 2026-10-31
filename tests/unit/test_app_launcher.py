@@ -10,7 +10,7 @@ import pytest
 
 from collectra.cli import invoke
 from collectra.pipelines.app_launcher import install_app
-from collectra.pipelines.base import Collectra
+from collectra.pipelines.base import Pipeline
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def test_cli_bundle_and_launch_arguments(tmp_path, pipeline_file, monkeypatch):
     inputs = tmp_path / "results with spaces"
     inputs.mkdir()
     apps = tmp_path / "Applications"
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     invoke(
         pipeline,
         ["install-app", str(inputs), "--name", "My Pipeline", "--app-dir", str(apps)],
@@ -118,7 +118,7 @@ def test_pipeline_icon_and_explicit_override(
     monkeypatch.setattr(sys, "platform", "darwin")
     image_path = pipeline_file.parent / "pipeline.png"
     Image.new("RGBA", (128, 128), "red").save(image_path)
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     pipeline.pipeline_metadata[metadata_key] = "pipeline.png"
     bundle = pipeline.cli_install_app(name="Pipeline Icon", app_dir=tmp_path)
     icon_path = bundle / "Contents/Resources/AppIcon.icns"
@@ -133,7 +133,7 @@ def test_pipeline_icon_and_explicit_override(
 
 def test_force_replaces_bundle_via_cli(tmp_path, pipeline_file, monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     bundle = install_app(pipeline_file, app_dir=tmp_path)
     old_file = bundle / "old-file"
     old_file.write_text("old")

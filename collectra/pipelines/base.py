@@ -1,6 +1,6 @@
 """Core pipeline execution and workflow management for Collectra.
 
-This module contains the main Collectra workflow class.
+This module contains the main ``Pipeline`` class.
 
 It provides the core functionality for defining, excuting and managing
 workflows with task dependencies.
@@ -12,12 +12,12 @@ The module supports:
     - Training and inference execution modes
 
 Classes:
-    Collectra: Main workflow management class
+    Pipeline: Main workflow management class
 """
 
 from __future__ import annotations
 
-__all__ = ["Collectra"]
+__all__ = ["Pipeline"]
 
 import copy
 import tempfile
@@ -30,9 +30,10 @@ import stat
 import sys
 import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, ClassVar
 
 from cappa import Arg
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 import graphviz
 import networkx as nx
 import yaml
@@ -52,7 +53,7 @@ from collectra.utils import change_dir, load_class_from_string, write_yaml
 from collectra.cli import command, group
 from utils.get_types import get_param_types, get_return_type, unpack_types
 
-from ..commons.base import TaskContext
+from ..commons.base import LenientAttributes, TaskContext
 from ..logger import get_logger
 from ..tasks.base import (
     Task,
@@ -132,26 +133,47 @@ class StageGate:
         return True
 
 
-class Collectra:
+class Pipeline(LenientAttributes, BaseModel):
     """Main workflow management class for Collectra pipelines.
 
     This class orchestrates the execution of complex data processing workflows
     by managing task dependencies, data flow, and execution state.
     """
 
+    model_config = ConfigDict(
+        extra="allow", validate_assignment=True, arbitrary_types_allowed=True
+    )
+
     # Constants
-    RESULTS_FILE = "results.yaml"
-    METADATA_KEY = "collectra_results_metadata"
-    PIPELINE_FILE = "pipeline.yaml"
-    PIPELINE_METADATA_KEY = "collectra_pipeline_metadata"
+    RESULTS_FILE: ClassVar[str] = "results.yaml"
+    METADATA_KEY: ClassVar[str] = "collectra_results_metadata"
+    PIPELINE_FILE: ClassVar[str] = "pipeline.yaml"
+    PIPELINE_METADATA_KEY: ClassVar[str] = "collectra_pipeline_metadata"
 
     # Graph visualization colors
-    COLOR_PROCESSING = "orange"
+    COLOR_PROCESSING: ClassVar[str] = "orange"
+    COLOR_SUCCESS: ClassVar[str] = "green"
+    COLOR_FAILURE: ClassVar[str] = "red"
+    COLOR_FONT: ClassVar[str] = "black"
+
+    name: str
+    ext: str
+    version: str
+    path: Path
+    pipeline_metadata: dict = Field(default_factory=dict)
+    node_manager: NodeGraphManager = Field(default_factory=NodeGraphManager, repr=False)
+    # The pipeline definition: every other keyword is a task or artefact entry.
+    data: dict[str, Any] = Field(default_factory=dict, repr=False)
+
+    # Runtime state of a run in progress.
     _stage_gate: StageGate | None = None
     _run_progress: RunProgress | None = None
-    COLOR_SUCCESS = "green"
-    COLOR_FAILURE = "red"
-    COLOR_FONT = "black"
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _version_is_text(cls, value):
+        # YAML reads ``version: 1`` as a number; a version is always text.
+        return str(value) if isinstance(value, (int, float)) else value
 
     def __init__(
         self,
@@ -169,27 +191,34 @@ class Collectra:
             ext (str): File extension that the workflow accepts.
             version (str): Version of the workflow.
             path (str, optional): Path to the workflow files. Defaults to name.
-            **kwargs: Additional configuration parameters.
+            **kwargs: The pipeline definition: task and artefact entries.
         """
-        self.name: str = name
-        self.ext: str = ext
-        self.version: str = version
-        self.pipeline_metadata = {
-            **(pipeline_metadata or {}),
-            "name": name,
-            "ext": ext,
-            "version": version,
-        }
-        self.node_manager: NodeGraphManager = NodeGraphManager()
-        self.path: Path = Path.cwd() / name if not path else Path(path)
-        self.data: dict = kwargs
+        super().__init__(
+            name=name,
+            ext=ext,
+            version=version,
+            path=Path(path) if path else Path.cwd() / str(name),
+            pipeline_metadata={
+                **(pipeline_metadata or {}),
+                "name": name,
+                "ext": ext,
+                "version": version,
+            },
+            data=kwargs,
+        )
+
+    # A pipeline is a long-lived object holding its graph: compare by identity.
+    def __eq__(self, other: object) -> bool:
+        return self is other
+
+    __hash__ = object.__hash__
 
     def __call__(self, task_name: str, **kwargs):
         """Allow instance to be called directly to run workflow."""
         self.run(task_name, **kwargs)
 
     @classmethod
-    def from_file(cls, pipeline_path: str | Path) -> "Collectra":
+    def from_file(cls, pipeline_path: str | Path) -> "Pipeline":
         """Load a pipeline from a directory or a pipeline YAML file."""
         path = Path(pipeline_path).expanduser().resolve()
         config_path = path / cls.PIPELINE_FILE if path.is_dir() else path
@@ -1768,3 +1797,8 @@ class Collectra:
             )
 
         return dot_str
+
+
+# The class was called ``Collectra`` before it became ``Pipeline``; the old name
+# still works so existing scripts keep running.
+Collectra = Pipeline

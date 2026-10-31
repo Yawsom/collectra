@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from collectra import Collectra, ConcatenateText, TaskNode, Text
+from collectra import Pipeline, ConcatenateText, TaskNode, Text
 
 
 def text(value: str, identifier: str) -> Text:
@@ -38,7 +38,7 @@ def test_pipeline_assigns_every_collective_input_as_a_parent(tmp_path, monkeypat
         items={first.id: first, second.id: second},
     )
     task = ConcatenateText("join", input="lines", output="joined")
-    pipeline = Collectra("collective", "collectra", "1", path=tmp_path)
+    pipeline = Pipeline("collective", "collectra", "1", path=tmp_path)
     task_node = TaskNode("join", task)
     monkeypatch.setattr(
         pipeline.node_manager,

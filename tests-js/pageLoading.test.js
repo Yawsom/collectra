@@ -30,7 +30,10 @@ function pageContext({carry = null, activeTab = null} = {}) {
     return {context, bottom, other, item};
 }
 
-const run = (context) => vm.runInNewContext(`${source}\nloadCollectraFolderInner(0)`, context);
+// The page data is applied by one shared function; run the real one.
+const applyStart = html.indexOf('function applyPageNodeData(');
+const applySource = html.slice(applyStart, html.indexOf('\n        }\n', applyStart)) + '\n        }\n';
+const run = (context) => vm.runInNewContext(`${applySource}\n${source}\nloadCollectraFolderInner(0)`, context);
 
 it.each([null, 'crop'])('renders only the final selected artefact when carrying %s', async carry => {
     const {context, bottom, other, item} = pageContext({carry});

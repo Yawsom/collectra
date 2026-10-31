@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from collectra import Collectra, Image, ImageClassifierYOLO, Link
+from collectra import Pipeline, Image, ImageClassifierYOLO, Link
 from collectra.types.base import ArtefactNode
 
 
@@ -70,7 +70,7 @@ def test_classifier_output_nodes_are_typed_as_links(tmp_path):
             sort_keys=False,
         )
     )
-    pipeline = Collectra.from_file(pipeline_file)
+    pipeline = Pipeline.from_file(pipeline_file)
     pipeline.connect()
 
     for name in ("Algae", "Fungi", "Pollen"):

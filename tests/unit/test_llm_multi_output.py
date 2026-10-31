@@ -8,7 +8,7 @@ import yaml
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel
 
-from collectra import Collectra
+from collectra import Pipeline
 from collectra.commons import TaskContext
 from collectra.tasks.base import Task
 from collectra.tasks.llms import LLM
@@ -289,7 +289,7 @@ class Describe(Task):
 
 
 def label_pipeline(tmp_path, **llm):
-    return Collectra(
+    return Pipeline(
         "Lab",
         "lab",
         "0.1.0",
