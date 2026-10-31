@@ -117,8 +117,4 @@ class LLMCanonicaliser(CollectraLLM):
 
         response = self.invoke()
 
-        name = self.get_output_name()
-
-        output = Text(name=name, data=response)
-
-        return output
+        return self.text_output(response)

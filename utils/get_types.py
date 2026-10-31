@@ -1,4 +1,4 @@
-from typing import get_args, get_type_hints
+from typing import get_args, get_origin, get_type_hints
 
 __all__ = ["get_param_types", "get_return_type"]
 
@@ -27,7 +27,11 @@ def unpack_types(fn, unpack_fn) -> dict:
         return dict()
     for param, type_ in param_types.items():
         if get_args(type_):
-            param_types[param] = tuple(
-                [arg for arg in get_args(type_) if arg is not type(None)]
-            )
+            # ``list[X]`` inside a union stands for several X's: the node holds X.
+            unwrapped = [
+                get_args(arg)[0] if get_origin(arg) is list and get_args(arg) else arg
+                for arg in get_args(type_)
+                if arg is not type(None)
+            ]
+            param_types[param] = tuple(dict.fromkeys(unwrapped))
     return param_types

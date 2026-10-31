@@ -374,7 +374,7 @@ class IRNResolver(LLMCanonicaliser):
         for filter_index in range(len(self._vector_stores)):
             matched = self._try_filter(filter_index, query_text, args)
             if matched is not None:
-                return Text(name=self.get_output_name(), data=matched)
+                return self.text_output(matched)
 
         logger.info("IRN resolver %s returned empty (no acceptable match)", self.name)
-        return Text(name=self.get_output_name(), data="")
+        return self.text_output("")

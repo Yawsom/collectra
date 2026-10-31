@@ -20,6 +20,7 @@ from __future__ import annotations
 __all__ = ["Collectra"]
 
 import copy
+import tempfile
 from contextlib import nullcontext
 import datetime
 import json
@@ -68,6 +69,32 @@ from ..types.texts import Text
 from .node_graph_manager import NodeGraphManager
 
 logger = get_logger(__name__)
+
+
+class PreviousOutputs:
+    """What a task produced before a forced rerun, kept until the rerun succeeds.
+
+    Output items are emptied and the node's saved files are moved aside so the
+    rerun starts clean. If the rerun produces nothing, everything is put back.
+    """
+
+    def __init__(self, snapshots: list, moved: list, backup: Path | None):
+        self.snapshots = snapshots
+        self.moved = moved
+        self.backup = backup
+
+    def restore(self) -> None:
+        for output, items in self.snapshots:
+            output.items.update(items)
+        for kept, original in self.moved:
+            original.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(kept), str(original))
+        self.discard()
+
+    def discard(self) -> None:
+        if self.backup is not None:
+            shutil.rmtree(self.backup, ignore_errors=True)
+            self.backup = None
 
 
 class RunProgress:
@@ -1132,12 +1159,16 @@ class Collectra:
         if self._stage_gate and self._stage_gate.defer(node, kwargs.get("value", "")):
             return
 
-        previous = self._take_outputs(node) if force else []
-        results = self._run_task(node, **kwargs)
-        if not results:
+        previous = self._take_outputs(node, kwargs.get("value")) if force else None
+        try:
+            results = self._run_task(node, **kwargs)
+        except BaseException:
+            if previous is not None:
+                previous.restore()
+            raise
+        if previous is not None:
             # A failed rerun must not destroy the output it was meant to replace.
-            for output, items in previous:
-                output.items.update(items)
+            previous.discard() if results else previous.restore()
 
         self._update_node_status(node, bool(results))
         self.render("workflow_run", file=kwargs.get("value", ""), render=render)
@@ -1155,12 +1186,40 @@ class Collectra:
         """Whether any of a task's output nodes already holds items."""
         return any(output.items for output in self._output_nodes(node))
 
-    def _take_outputs(self, node: TaskNode) -> list[tuple[ArtefactNode, dict]]:
-        """Empty a task's output nodes so new results replace the old ones."""
-        taken = [(output, dict(output.items)) for output in self._output_nodes(node)]
-        for output, _ in taken:
+    def _take_outputs(self, node: TaskNode, folder) -> PreviousOutputs:
+        """Empty a task's output nodes before a forced rerun replaces them.
+
+        Each artefact is dropped from its node. If it keeps its content in a
+        file, that exact file, as the artefact records it, is moved aside until
+        the rerun succeeds. Nothing is inferred from folder names, so results
+        written by hand or by older versions are handled the same way.
+        """
+        outputs = self._output_nodes(node)
+        snapshots = [(output, dict(output.items)) for output in outputs]
+        moved: list[tuple[Path, Path]] = []
+        backup = None
+        root = Path(str(folder)).resolve() if folder else None
+        for output in outputs:
+            for item in output.items.values():
+                for file in item.stored_files(root) if root else []:
+                    if not file.resolve().is_relative_to(root):
+                        logger.warning(
+                            "Not deleting %s: it is outside the results folder %s",
+                            file,
+                            root,
+                        )
+                        continue
+                    already = any(file == original for _, original in moved)
+                    if already or not file.is_file():
+                        continue
+                    if backup is None:
+                        backup = Path(tempfile.mkdtemp(prefix="collectra-previous-"))
+                    kept = backup / str(len(moved))
+                    shutil.move(str(file), str(kept))
+                    moved.append((kept, file))
+        for output, _ in snapshots:
             output.items.clear()
-        return taken
+        return PreviousOutputs(snapshots, moved, backup)
 
     def _execute_artefact_node(
         self, node: ArtefactNode, args: tuple, kwargs: dict, render: bool
@@ -1179,6 +1238,10 @@ class Collectra:
             ):
                 self._check_existing(node, arg)
         self._name_new_items(node, args)
+        folder = kwargs.get("value")
+        if folder:
+            for item in node.items.values():
+                item.finalise(Path(str(folder)), node.name)
 
         # Mark as READY even if no items matched — parent task has completed
         if node.status == NodeStatus.NOT_READY:

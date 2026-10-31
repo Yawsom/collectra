@@ -138,6 +138,24 @@ class Artefact(EntityMixin, BaseModel, metaclass=ArtefactMeta):
     def __call__(self):
         """The artefact's content."""
 
+    def stored_files(self, folder: Path) -> list[Path]:
+        """Files this artefact owns, for removal before a forced rerun replaces it.
+
+        ``folder`` is the results folder that relative paths are read against.
+        Most artefacts own none: an image's ``data`` is a source file that must
+        never be deleted. Only artefacts whose content a task wrote to a file
+        of its own list it here.
+        """
+        return []
+
+    def finalise(self, folder: Path, node: str) -> None:
+        """Called once the artefact has its final id, before results are saved.
+
+        ``folder`` is the results folder and ``node`` the name of the node the
+        artefact belongs to. Artefacts that keep content in separate files
+        write them here. The default does nothing.
+        """
+
     def _comparable(self) -> dict:
         values = {**self.__dict__, **(self.__pydantic_extra__ or {})}
         return {k: v for k, v in values.items() if k not in self._not_compared}

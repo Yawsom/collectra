@@ -23,7 +23,7 @@ from PIL import Image as PILImage
 from rich.progress import track
 
 from collectra.cli import command
-from collectra.tasks.base import Task
+from collectra.tasks.text_output import TextOutputTask
 from collectra.types.images import Image, open_oriented
 from collectra.types.texts import Text
 from collectra.utils import threading_locked
@@ -94,7 +94,7 @@ class _ExportedLines:
         return _rgb(open_oriented(self.directory / item["file"])), item["text"]
 
 
-class OCRHuggingFace(Task):
+class OCRHuggingFace(TextOutputTask):
     """Transcribe images with a Transformers image-text-to-text model."""
 
     def __init__(
@@ -287,7 +287,7 @@ class OCRHuggingFace(Task):
             raise TypeError("OCRHuggingFace requires one or more Image artefacts")
         self._load()
         texts = self._generate([_rgb(image.pil()) for image in images])
-        return [Text(name=self.get_output_name(), data=text) for text in texts]
+        return [self.text_output(text) for text in texts]
 
     def _samples(
         self, inputs: list[str], exclude: str = "", max_items: int | None = None

@@ -144,6 +144,7 @@ def test_replace_inputs():
 
 def test_invoke():
     mock_self = MagicMock()
+    mock_self.is_structured = False
     mock_self.context.usage_file = None
     mock_self.parser.invoke.return_value = "hello"
 
@@ -160,10 +161,11 @@ def test_invoke():
 
 def test_run_returns_text():
     mock_self = MagicMock(spec=LLM)
+    mock_self.is_structured = False
     mock_self._prefetched = {}
     mock_self._build_messages.return_value = [{"type": "text", "text": "Hello Alice"}]
     mock_self.invoke.return_value = "some response"
-    mock_self.get_output_name.return_value = "output_name"
+    mock_self.text_output.side_effect = lambda data: Text(name="output_name", data=data)
 
     result = LLM.run(mock_self, MagicMock(spec=Text))
 

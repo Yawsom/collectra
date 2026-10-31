@@ -3,13 +3,14 @@ __all__ = ["OCRSuraya", "LineDetectorSurya"]
 from dotenv import load_dotenv
 
 from collectra.tasks.base import Task
+from collectra.tasks.text_output import TextOutputTask
 from collectra.types.images import Image, ImageCrop
 from collectra.types.texts import Text
 
 load_dotenv()
 
 
-class OCRSuraya(Task):
+class OCRSuraya(TextOutputTask):
     def __init__(self, name: str, **kwargs) -> None:
         """Initialize the task without loading Surya model weights."""
         super().__init__(name, **kwargs)
@@ -55,7 +56,7 @@ class OCRSuraya(Task):
                 [image.pil()], det_predictor=self.detection_predictor
             )
             text = "\n".join(line.text for line in predictions[0].text_lines)
-            results.append(Text(name=self.get_output_name(), data=text))
+            results.append(self.text_output(text))
         return results
 
 

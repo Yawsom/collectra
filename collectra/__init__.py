@@ -33,6 +33,7 @@ _EXPORTS = {
     "LineDetectorSurya": "collectra.tasks.ocr",
     "LineDetectorRLSA": "collectra.tasks.line_detection",
     "ConcatenateText": "collectra.tasks.text",
+    "TextOutputTask": "collectra.tasks.text_output",
     "Artefact": "collectra.types.base",
     "ArtefactNode": "collectra.types.base",
     "Image": "collectra.types.images",
