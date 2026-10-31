@@ -1,9 +1,10 @@
-from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from io import StringIO
 from pathlib import Path
+from typing import Any
 
 from markdown import Markdown as MDown
+from pydantic import field_validator
 
 from .base import Artefact
 
@@ -32,19 +33,23 @@ def unmark(text):
     return __md.convert(text)
 
 
-@dataclass
 class Text(Artefact):
 
-    data: str | Path | None = field(default=None)
-    path: str | Path | None = field(default=None)
+    data: str | Path | None = None
+    path: str | Path | None = None
 
-    def __post_init__(self):
-        super().__post_init__()
+    @field_validator("data", mode="before")
+    @classmethod
+    def _numbers_are_text(cls, value):
+        # YAML reads ``book: 1`` as a number, but a Text always holds text.
+        if isinstance(value, (bool, int, float)):
+            return str(value)
+        return value
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
         if self.path is not None and self.data is not None:
             raise ValueError("Text accepts either data or path, not both")
-        # YAML reads ``book: 1`` as a number, but a Text always holds text.
-        if isinstance(self.data, (bool, int, float)):
-            self.data = str(self.data)
         # Continue accepting legacy file references in data.
         if self.path is None and self.data:
             try:

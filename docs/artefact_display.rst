@@ -33,10 +33,8 @@ For example, an external Image subclass automatically inherits its viewer::
 
 A custom artefact can describe a read-only value::
 
-    from dataclasses import dataclass
     from collectra.types.base import Artefact
 
-    @dataclass
     class Measurement(Artefact):
         value: float = 0.0
 

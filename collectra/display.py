@@ -8,7 +8,6 @@ annotations use viewer-relative normalized coordinates. Text formats are
 
 import base64
 import io
-from dataclasses import fields
 from pathlib import Path
 
 from collectra.utils import load_class_from_string
@@ -56,7 +55,7 @@ class DisplayContext:
                 if "path" not in record:
                     record.pop("data", None)
                 record["path"] = source
-        accepted = {f.name for f in fields(cls) if f.init}
+        accepted = set(cls.model_fields) - cls._runtime_fields
         item = cls(**{k: v for k, v in record.items() if k in accepted})
         self.instances[node_id] = item
         if type(item) is Link:

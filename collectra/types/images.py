@@ -22,13 +22,14 @@ __all__ = ["Image", "ImageCrop", "ImageSegmentation"]
 import base64
 import io
 import shutil
-from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from PIL import Image as ImagePil
 from PIL import ImageOps
+from pydantic import Field, PrivateAttr, field_validator
 
 from collectra.cli import command
 
@@ -254,7 +255,6 @@ class Orientation(Enum):
                 raise ValueError(f"Invalid degree for orientation: {direction}")
 
 
-@dataclass
 class Image(Artefact):
     """Base class for handling image data and metadata in Collectra workflows.
 
@@ -269,12 +269,18 @@ class Image(Artefact):
         format (str | None): Image format (PNG, JPEG, etc.) or None if unknown.
     """
 
-    data: str | Path | ImagePil.Image = field(default="")  # Path to the image file
-    raw_width: int = field(init=False, default=0)  # Image width in pixels
-    raw_height: int = field(init=False, default=0)  # Image height in pixels
-    ext: str | None = field(default="")  # Image format (e.g., PNG, JPEG)
-    embeddings: str | list[str] = field(default_factory=list)  # Optional embedding data
-    orientation: Orientation = field(default=Orientation.NORTH)  # Image orientation
+    data: str | Path | ImagePil.Image = ""  # Path to the image file
+    raw_width: int = 0  # Displayed image width in pixels
+    raw_height: int = 0  # Displayed image height in pixels
+    ext: str | None = ""  # Image format (e.g., PNG, JPEG)
+    orientation: Orientation = Orientation.NORTH  # Image orientation
+
+    @field_validator("orientation", mode="before")
+    @classmethod
+    def _orientation_from_text(cls, value):
+        if isinstance(value, str):
+            return Orientation.from_string(value)
+        return value
 
     @classmethod
     def cli_commands(cls, node: ArtefactNode, ext: str) -> ImageArtefactCommands:
@@ -314,8 +320,8 @@ class Image(Artefact):
     def height(self) -> int | float:
         return self.raw_height
 
-    def __post_init__(self):
-        """Create an Image instance from a file path.
+    def model_post_init(self, __context: Any) -> None:
+        """Load an Image's metadata from its file path.
 
         Loads image metadata (dimensions and format) from the specified file
         and returns a configured Image instance.
@@ -330,7 +336,7 @@ class Image(Artefact):
             FileNotFoundError: If the image file doesn't exist.
             PIL.UnidentifiedImageError: If the file is not a valid image.
         """
-        super().__post_init__()
+        super().model_post_init(__context)
         if not self.data:
             raise ValueError("Image data path is empty.")
         if not isinstance(self.data, (str, Path)):
@@ -339,10 +345,6 @@ class Image(Artefact):
             self.data = Path.cwd() / self.data
         if not self.data.exists() or not self.data.is_file():
             raise FileNotFoundError(f"Image file not found: {self.data}")
-        if not isinstance(self.embeddings, list):
-            self.embeddings = [self.embeddings]
-        if isinstance(self.orientation, str):
-            self.orientation = Orientation.from_string(self.orientation)
         stat = self.data.stat()
         self.raw_width, self.raw_height, self.ext = _image_metadata(
             str(self.data.resolve()), stat.st_mtime_ns, stat.st_size
@@ -513,7 +515,6 @@ class Image(Artefact):
         pass
 
 
-@dataclass
 class ImageCrop(Image):
     """Specialized image class for handling cropped regions of images.
 
@@ -528,12 +529,15 @@ class ImageCrop(Image):
         height_relative (float): Normalized height of crop region (0.0 to 1.0).
     """
 
-    x_center: float = field(default=0.5)
-    y_center: float = field(default=0.5)
-    width_relative: float = field(default=1.0)
-    height_relative: float = field(default=1.0)
-    confidence: float | None = field(default=None)
-    source_parent: "Image | ImageCrop | None" = field(init=False, default=None)
+    x_center: float = 0.5
+    y_center: float = 0.5
+    width_relative: float = 1.0
+    height_relative: float = 1.0
+    confidence: float | None = None
+    source_parent: Any = Field(default=None, repr=False)  # Image | ImageCrop | None
+
+    def attributes_to_ignore(self):
+        return super().attributes_to_ignore() | {"source_parent"}
 
     def display_bounds(self):
         return self.coordinates()
@@ -692,7 +696,6 @@ class ImageCrop(Image):
         return iou
 
 
-@dataclass
 class ImageSegmentation(Image):
     """An image region defined by a source-sized binary PNG mask.
 
@@ -701,10 +704,11 @@ class ImageSegmentation(Image):
     nonzero bounding box and retains source alpha within the region.
     """
 
-    mask: str | Path = field(default="")
+    mask: str | Path = ""
+    _mask_path: Path | None = PrivateAttr(default=None)
 
-    def __post_init__(self):
-        super().__post_init__()
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
         if not self.mask:
             raise ValueError("ImageSegmentation mask path is empty")
         self.mask = Path(self.mask)

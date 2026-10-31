@@ -41,11 +41,9 @@ For example, place these files in an importable ``my_artefacts`` package.
 
 .. code-block:: python
 
-    from dataclasses import dataclass
     from pathlib import Path
     from collectra.types.base import Artefact
 
-    @dataclass
     class Measurement(Artefact):
         value: float = 0
 

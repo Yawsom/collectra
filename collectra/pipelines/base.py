@@ -20,6 +20,7 @@ from __future__ import annotations
 __all__ = ["Collectra"]
 
 import copy
+from contextlib import nullcontext
 import datetime
 import json
 import shlex
@@ -35,7 +36,16 @@ import graphviz
 import networkx as nx
 import yaml
 from rich.markup import escape
-from rich.progress import track
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+    track,
+)
 
 from collectra.utils import change_dir, load_class_from_string, write_yaml
 from collectra.cli import command, group
@@ -58,6 +68,23 @@ from ..types.texts import Text
 from .node_graph_manager import NodeGraphManager
 
 logger = get_logger(__name__)
+
+
+class RunProgress:
+    """One overall bar for a multi-file run, with the file it is up to."""
+
+    def __init__(self, progress, label: str, total: int):
+        self.progress = progress
+        self.label = label
+        self.task = progress.add_task(escape(label), total=total)
+
+    def status(self, text: str) -> None:
+        self.progress.update(
+            self.task, description=f"{escape(self.label)} · {escape(text)}"
+        )
+
+    def file_done(self) -> None:
+        self.progress.advance(self.task)
 
 
 class StageGate:
@@ -94,6 +121,7 @@ class Collectra:
     # Graph visualization colors
     COLOR_PROCESSING = "orange"
     _stage_gate: StageGate | None = None
+    _run_progress: RunProgress | None = None
     COLOR_SUCCESS = "green"
     COLOR_FAILURE = "red"
     COLOR_FONT = "black"
@@ -487,9 +515,28 @@ class Collectra:
         downstream = {} if options["single"] else self._batchable_tasks(starting_nodes)
         batch_size = self._starting_batch_size(starting_nodes)
         batch_size = max([batch_size, *(t.batch_size for t in downstream.values())])
-        for start in range(0, len(files), batch_size):
-            chunk = files[start : start + batch_size]
-            self._process_chunk(starting_nodes, chunk, options, downstream)
+        overall = (
+            Progress(
+                SpinnerColumn(),
+                TextColumn("{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+            )
+            if len(files) > 1
+            else None
+        )
+        with overall if overall is not None else nullcontext():
+            if overall is not None:
+                label = ", ".join(node.name for node in starting_nodes) or self.name
+                self._run_progress = RunProgress(overall, label, len(files))
+            try:
+                for start in range(0, len(files), batch_size):
+                    chunk = files[start : start + batch_size]
+                    self._process_chunk(starting_nodes, chunk, options, downstream)
+            finally:
+                self._run_progress = None
 
     def _process_chunk(
         self,
@@ -511,9 +558,12 @@ class Collectra:
         try:
             while stage:
                 if prefetch:
+                    self._announce_batch(stage)
                     self._prefetch_stage(stage, stage_options)
                 deferred: list[tuple[str, list[TaskNode]]] = []
                 for file_path, nodes in stage:
+                    if self._run_progress:
+                        self._run_progress.status(Path(str(file_path)).name)
                     if self._stage_gate:
                         self._stage_gate.current = {node.name for node in nodes}
                         self._stage_gate.deferred = {}
@@ -521,8 +571,10 @@ class Collectra:
                         self._process_single_file(nodes, file_path, stage_options)
                     except Exception as e:
                         logger.error("Error processing file: %s", e, exc_info=True)
-                    if self._stage_gate:
-                        deferred.extend(self._stage_gate.deferred.items())
+                    held = self._stage_gate.deferred if self._stage_gate else {}
+                    deferred.extend(held.items())
+                    if self._run_progress and not held:
+                        self._run_progress.file_done()
                 # Later stages resume from each file's saved folder, in place.
                 stage = deferred
                 stage_options = {**options, "output": None}
@@ -531,6 +583,25 @@ class Collectra:
             self._stage_gate = None
             self._clear_prefetch(
                 [*starting_nodes, *self._task_nodes_by_name(downstream)]
+            )
+
+    def _announce_batch(self, stage: list[tuple[str, list[TaskNode]]]) -> None:
+        """Say on the overall bar that a batch is being prepared with the model."""
+        if not self._run_progress:
+            return
+        names = sorted(
+            {
+                node.name
+                for _, nodes in stage
+                for node in nodes
+                if node.get_task().batch_size > 1
+            }
+        )
+        if names:
+            count = len(stage)
+            self._run_progress.status(
+                f"waiting on batch of {count} file{'s' if count != 1 else ''} "
+                f"({', '.join(names)})"
             )
 
     def _task_nodes_by_name(self, tasks: dict[str, Task]) -> list[TaskNode]:
@@ -1307,12 +1378,18 @@ class Collectra:
         if len(entries) == 0:
             logger.warning("No input data found for task %s, skipping.", task.name)
             return results
-        with change_dir(self.path):
-            for entry in track(
+        # Inside an overall bar a per-task bar would only add noise.
+        listed = (
+            entries
+            if self._run_progress
+            else track(
                 entries,
                 total=len(entries),
                 description=f"Running {task.name}",
-            ):
+            )
+        )
+        with change_dir(self.path):
+            for entry in listed:
                 if not isinstance(entry, list):
                     entry = list(entry)
                 entry_result = self._execute_entries(entry, task)

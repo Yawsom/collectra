@@ -1,6 +1,5 @@
 import base64
 import io
-from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,7 +12,6 @@ from collectra.gui.backend import GUIBackend
 from collectra.types.base import Artefact
 
 
-@dataclass
 class Measurement(Artefact):
     value: float = 0
 
@@ -483,11 +481,9 @@ def test_external_artefact_publishes_renderer_beside_python_module(
     )
     (package / "measurement.js").write_text(source)
     (package / "measurement.py").write_text("""
-from dataclasses import dataclass
 from pathlib import Path
 from collectra.types.base import Artefact
 
-@dataclass
 class Measurement(Artefact):
     value: float = 0
 

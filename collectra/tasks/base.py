@@ -188,8 +188,18 @@ class Task(EntityMixin, BaseModel, Generic[T]):
                 help="Rerun tasks whose outputs already exist, replacing those outputs. By default such tasks are skipped."
             ),
         ] = False,
+        batch_size: Annotated[
+            int | None,
+            Arg(
+                help="Inputs to send to the model at once, for tasks that can batch their work. Omit to keep the task's own setting."
+            ),
+        ] = None,
     ) -> None:
         """Run this task for the supplied input files."""
+        if batch_size is not None:
+            if batch_size < 1:
+                raise ValueError("--batch-size must be at least 1")
+            self.batch_size = batch_size
         if self.pipeline is None:
             raise RuntimeError(f"Task {self.name!r} is not attached to a pipeline")
         self.pipeline.cli_run(

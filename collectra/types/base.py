@@ -1,15 +1,17 @@
 import uuid
+from abc import abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 from rich import print
 
 from collectra.cli import command
 
-from ..commons import BaseEntity, Node, NodeStatus
+from ..commons import EntityMixin, Node, NodeStatus
 from ..utils import (
     change_dir,
     error_msg,
@@ -60,18 +62,92 @@ class ArtefactCommands:
             report.save_csv(output)
 
 
-@dataclass
-class Artefact(BaseEntity):
-    name: str
-    id: str = field(default="")
-    parents: list[str] = field(default_factory=list)
-    partition: str = field(default="")
-    embeddings: list[str] = field(default_factory=list)
-    orientation: str = field(default="north")  # e.g., "landscape" or "portrait"
-    ensemble: list[str] = field(default_factory=list)
-    source_file: Path | None = field(
-        default=None, init=False, repr=False, compare=False
+class ArtefactMeta(type(BaseModel)):
+    """Lets an artefact that stands in for another one pass its ``isinstance`` checks.
+
+    A ``Link`` is a soft reference; once bound it should satisfy
+    ``isinstance(link, ImageCrop)`` when it points at a crop. The real class of
+    the object is left alone, which pydantic relies on.
+    """
+
+    def __instancecheck__(cls, instance) -> bool:
+        if super().__instancecheck__(instance):
+            return True
+        stand_in = getattr(type(instance), "_stand_in_type", None)
+        return bool(stand_in) and issubclass(stand_in(instance), cls)
+
+
+class Artefact(EntityMixin, BaseModel, metaclass=ArtefactMeta):
+    model_config = ConfigDict(
+        extra="allow",
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        protected_namespaces=(),
     )
+
+    name: str
+    id: str = ""
+    parents: list[str] = Field(default_factory=list)
+    partition: str = ""
+    embeddings: list[str] = Field(default_factory=list)
+    orientation: str = "north"  # e.g., "landscape" or "portrait"
+    ensemble: list[str] = Field(default_factory=list)
+    source_file: Path | None = Field(default=None, exclude=True, repr=False)
+
+    # An automatic id is provisional: the pipeline renames it after the node
+    # (``node`` or ``node-k``) when the artefact joins its node.
+    _auto_id: bool = PrivateAttr(default=False)
+    # Fields left out when comparing artefacts: runtime state, not content.
+    _not_compared: ClassVar[frozenset[str]] = frozenset({"source_file"})
+
+    # Measured or set at runtime, never passed in: skipped for positional arguments.
+    _runtime_fields: ClassVar[frozenset[str]] = frozenset(
+        {"source_file", "raw_width", "raw_height", "source_parent"}
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        if args:
+            names = [
+                field
+                for field in type(self).model_fields
+                if field not in self._runtime_fields
+            ]
+            if len(args) > len(names):
+                raise TypeError(
+                    f"{type(self).__name__} takes at most {len(names)} positional "
+                    f"arguments but {len(args)} were given"
+                )
+            for field_name, value in zip(names, args):
+                if field_name in kwargs:
+                    raise TypeError(
+                        f"{type(self).__name__} got multiple values for "
+                        f"argument {field_name!r}"
+                    )
+                kwargs[field_name] = value
+        super().__init__(**kwargs)
+
+    @field_validator("parents", "embeddings", mode="before")
+    @classmethod
+    def _as_list(cls, value):
+        """YAML writes a single reference as a bare value; always hold a list."""
+        if value is None:
+            return []
+        return value if isinstance(value, list) else [value]
+
+    @abstractmethod
+    def __call__(self):
+        """The artefact's content."""
+
+    def _comparable(self) -> dict:
+        values = {**self.__dict__, **(self.__pydantic_extra__ or {})}
+        return {k: v for k, v in values.items() if k not in self._not_compared}
+
+    def __eq__(self, other: object) -> bool:
+        if type(self) is not type(other):
+            return False
+        return self._comparable() == other._comparable()
+
+    __hash__ = None
 
     def set_parents(self, parents: list["Artefact"]) -> None:
         self.parents = [parent.id for parent in parents]
@@ -121,10 +197,7 @@ class Artefact(BaseEntity):
         # Generate a unique ID based on the name and other attributes
         return f"{self.name}-{uuid.uuid4()}"
 
-    def __post_init__(self) -> None:
-        super().__init__(self.name)  # Initialize BaseEntity
-        # An automatic id is provisional: the pipeline renames it after the
-        # node (``node`` or ``node-k``) when the artefact joins its node.
+    def model_post_init(self, __context: Any) -> None:
         self._auto_id = not self.id
         if not self.id:
             self.id = self._generate_id()
@@ -510,7 +583,7 @@ class ArtefactNode(Node):
                                 if (
                                     "data" not in item
                                     and "path" in item
-                                    and "path" not in cls_.__dataclass_fields__
+                                    and "path" not in cls_.model_fields
                                 ):
                                     item["data"] = item.pop("path")
                                 if "parents" in item and not isinstance(
@@ -651,7 +724,7 @@ class ArtefactNode(Node):
                         if not match:
                             continue
                         item["name"] = name
-                        if "path" in item and "path" not in cls_.__dataclass_fields__:
+                        if "path" in item and "path" not in cls_.model_fields:
                             item["data"] = item.pop("path")
                         if partition is not None:
                             item["partition"] = partition
