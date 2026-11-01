@@ -12,6 +12,7 @@ from rich.table import Table
 
 from ..logger import get_logger
 from ..types import ArtefactNode
+from ..commons.results import pop_header
 from ..utils import change_dir
 
 logger = get_logger(__name__)
@@ -287,7 +288,7 @@ class Evaluator:
         with change_dir(path):
             with open("results.yaml", "r") as f:
                 data = yaml.safe_load(f)
-                data.pop("collectra_results_metadata", "")
+                pop_header(data, source=path)
                 node_names = list(data.keys())
         for name in node_names:
             node = ArtefactNode(name=name)

@@ -342,13 +342,14 @@ class TestAnnotationGraphToYamlData:
         graph = CollectraGraph.from_yaml_data(sample_yaml_data)
         result = graph.to_yaml_data()
 
-        # Check metadata preserved
-        assert "collectra_results_metadata" in result
+        # Check the header is preserved, as the first entry
+        assert list(result)[0] == "results"
+        assert result["results"]["type"] == "collectra.Results"
 
         # Check all nodes present in output
         all_ids = set()
         for key, value in result.items():
-            if key == "collectra_results_metadata":
+            if key == "results":
                 continue
             items = value if isinstance(value, list) else [value]
             for item in items:

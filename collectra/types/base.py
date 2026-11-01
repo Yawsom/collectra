@@ -11,6 +11,7 @@ from rich import print
 from collectra.cli import command
 
 from ..commons import EntityMixin, Node, NodeStatus, PositionalFields
+from ..commons.results import peek_header, pop_header
 from ..utils import (
     change_dir,
     error_msg,
@@ -534,9 +535,7 @@ class ArtefactNode(Node):
                     result_file = Path("results.yaml")
                     with open(result_file, "r") as f:
                         results: dict = yaml.safe_load(f)
-                        partition = results.pop(
-                            "collectra_results_metadata", dict()
-                        ).get("partition", None)
+                        partition = pop_header(results, source=value).partition
                         if key not in results:
                             # Normal when the task producing this node hasn't run yet.
                             logger.info(
@@ -634,9 +633,7 @@ class ArtefactNode(Node):
                     return data
                 with open(result_file, "r") as f:
                     file_data: dict = yaml.safe_load(f)
-                    partition = file_data.get("collectra_results_metadata", dict()).get(
-                        "partition", None
-                    )
+                    partition = peek_header(file_data, source=item_file).partition
                 # With unlabelled samples allowed, an empty annotation list
                 # means the same as no annotations at all.
                 all_names_not_found = all(

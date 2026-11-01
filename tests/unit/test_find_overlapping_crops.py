@@ -889,3 +889,30 @@ def test_the_repoint_options_need_remove_smaller(tmp_path):
         script.main([str(folder), "--repoint-dependents"])
     with pytest.raises(SystemExit):
         script.main([str(folder), "--repoint-min-iou", "0.5"])
+
+
+# --- the results header ----------------------------------------------------------
+
+
+def test_the_new_results_header_is_ignored(tmp_path):
+    folder = write_results(
+        tmp_path / "p",
+        {
+            "n": [
+                crop("c1", b=(0.5, 0.5, 0.5, 0.5)),
+                crop("c2", b=(0.5, 0.5, 0.5, 0.5)),
+            ]
+        },
+    )
+    path = folder / "results.yaml"
+    data = yaml.safe_load(path.read_text())
+    data.pop("collectra_results_metadata")
+    path.write_text(
+        yaml.safe_dump(
+            {"results": {"type": "collectra.Results", "partition": "p"}, **data},
+            sort_keys=False,
+        )
+    )
+    crops, failed = script.load_crops(path)
+    assert [c.id for c in crops] == ["c1", "c2"] and failed == 0
+    assert script.dependents_map(yaml.safe_load(path.read_text())) == {}

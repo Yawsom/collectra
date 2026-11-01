@@ -12,6 +12,16 @@ from cappa import Arg
 
 from collectra.cli import command
 from .adaptation_commands import YOLOAdaptationCommands
+from .base import (
+    Batch,
+    Epochs,
+    LearningRate,
+    ObjectDetectionTask,
+    RunResolution,
+    Threshold,
+    TrainResolution,
+    WeightDecay,
+)
 from collectra.types.images import (
     Image,
     ImageCrop,
@@ -28,7 +38,6 @@ from ..machine_learning.training import (
     print_distribution_table,
     run_training_command,
 )
-from .batching import image_cache_key
 from ..machine_learning.yolo import YOLOTask, get_yolo_class
 
 if TYPE_CHECKING:
@@ -69,10 +78,17 @@ class DetectionResult:
         return best_result
 
 
-class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
+class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask, ObjectDetectionTask):
     singletons: bool = False
-    imgsz: int | None = None
     batch_size: int = Field(default=1, ge=1)
+    # Ultralytics' own defaults, where they differ from the shared ones.
+    batch: int = Field(default=16, ge=1)
+    learning_rate: float = Field(default=0.01, gt=0)
+    weight_decay: float = Field(default=0.0005, ge=0)
+    # Overlap above which two boxes of one class count as the same object.
+    iou: float = Field(default=0.7, gt=0, le=1)
+
+    RENAMED_SETTINGS = {**ObjectDetectionTask.RENAMED_SETTINGS, "lr0": "learning_rate"}
 
     @command(name="run")
     def cli_run(
@@ -86,12 +102,9 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
             Path | None,
             Arg(help="Model checkpoint path. Omit to keep the configured model."),
         ] = None,
-        imgsz: Annotated[
-            int | None,
-            Arg(
-                help="Inference image size in pixels. Omit to keep the model's setting."
-            ),
-        ] = None,
+        resolution: RunResolution = None,
+        threshold: Threshold = None,
+        imgsz: Annotated[int | None, Arg(help="Deprecated: use --resolution.")] = None,
         batch_size: Annotated[
             int,
             Arg(
@@ -110,8 +123,11 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
             raise ValueError("--batch-size must be at least 1")
         if model is not None:
             self.model = model
-        if imgsz is not None:
-            self.imgsz = imgsz
+        resolution = self._current_name("imgsz", "resolution", imgsz, resolution)
+        if resolution is not None:
+            self.resolution = resolution
+        if threshold is not None:
+            self.threshold = threshold
         self.batch_size = batch_size
         super().cli_run(
             inputs,
@@ -127,6 +143,7 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
         self,
         *args: Image,
         model: str | Path | None = None,
+        resolution: int | None = None,
         imgsz: int | None = None,
         **kwargs,
     ) -> list[ImageCrop]:
@@ -141,8 +158,9 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
         Args:
             input (Image): The input image on which to perform object detection.
             model: Optional checkpoint path overriding the task's configured model.
-            imgsz: Optional inference image size in pixels. Defaults to the task's
-                configured size, or the model's setting when unset.
+            resolution: Optional image size in pixels. Defaults to the size chosen
+                for the task, or the model's own setting when none was chosen.
+            imgsz: Deprecated name for ``resolution``.
 
         Returns:
             list[ImageCrop]: A list of ImageCrop objects representing the detected
@@ -158,18 +176,23 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
         self._init_model()
         from torchvision.ops import batched_nms
 
-        imgsz = imgsz if imgsz is not None else self.imgsz
-        prefetched = getattr(self, "_prefetched", {})
-        results: Results | None = prefetched.pop(image_cache_key(image, imgsz), None)
+        resolution = self._current_name("imgsz", "resolution", imgsz, resolution)
+        if resolution is None:
+            resolution = self.inference_resolution
+        results: Results | None = (
+            self._take_prefetched(image)
+            if resolution == self.inference_resolution
+            else None
+        )
         if results is None:
-            results = self._predict([image], imgsz)[0]
+            results = self._predict([image], resolution)[0]
 
         if getattr(self.model.model, "end2end", False) and len(results.boxes):
             keep = batched_nms(
                 results.boxes.xyxy,
                 results.boxes.conf,
                 results.boxes.cls,
-                iou_threshold=0.7,
+                iou_threshold=self.iou,
             )
             results = results[keep]
 
@@ -248,7 +271,7 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
 
     def _predict(self, images: list[Image], imgsz: int | None) -> list[Results]:
         """Run the model over ``images`` together, returning one result each."""
-        inference_kwargs = {"iou": 0.7, "conf": 0.25}
+        inference_kwargs = {"iou": self.iou, "conf": self.threshold}
         if imgsz is not None:
             inference_kwargs["imgsz"] = imgsz
 
@@ -260,7 +283,9 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
                 if image.get_path().suffix.lower() in {".tif", ".tiff"}:
                     arrays[index] = self._tiff_pixels(image)
                 elif isinstance(image, ImageCrop):
-                    img_path = Path(temp_dir) / f"{index}-{Path(image.get_path()).stem}.png"
+                    img_path = (
+                        Path(temp_dir) / f"{index}-{Path(image.get_path()).stem}.png"
+                    )
                     image.pil().save(img_path, format="PNG")
                     paths[index] = img_path
                 else:
@@ -279,24 +304,8 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
                     results[index] = result
         return results
 
-    @threading_locked()
-    def prefetch(self, entries: list[list]) -> None:
-        """Run the model over many images in batches, caching results for ``run``."""
-        self._init_model()
-        imgsz = self.imgsz
-        images = [
-            entry[0]
-            for entry in entries
-            if len(entry) == 1 and isinstance(entry[0], Image)
-        ]
-        self._prefetched = {}
-        for start in range(0, len(images), self.batch_size):
-            batch = images[start : start + self.batch_size]
-            for image, result in zip(batch, self._predict(batch, imgsz)):
-                self._prefetched[image_cache_key(image, imgsz)] = result
-
-    def clear_prefetch(self) -> None:
-        self._prefetched = {}
+    def _predict_batch(self, images: list[Image]) -> list[Results]:
+        return self._predict(images, self.inference_resolution)
 
     @command
     def train(
@@ -331,18 +340,9 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
             str,
             Arg(help="Partition value identifying examples to exclude from training."),
         ] = "",
-        epochs: Annotated[
-            int,
-            Arg(help="Number of training epochs."),
-        ] = 100,
-        batch: Annotated[
-            int,
-            Arg(help="Training batch size."),
-        ] = 16,
-        imgsz: Annotated[
-            int,
-            Arg(help="Target training image size in pixels."),
-        ] = 640,
+        epochs: Epochs = None,
+        batch: Batch = None,
+        resolution: TrainResolution = None,
         early_stop: Annotated[
             int,
             Arg(
@@ -418,25 +418,21 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
         multi_scale: Annotated[
             float,
             Arg(
-                help="Vary image size by this fraction of imgsz; 0 disables multi-scale training."
+                help="Vary image size by this fraction of the resolution; 0 disables multi-scale training."
             ),
         ] = 0.0,
-        lr0: Annotated[
-            float,
-            Arg(help="Initial learning rate."),
-        ] = 0.01,
+        learning_rate: LearningRate = None,
         lrf: Annotated[
             float,
-            Arg(help="Final learning-rate multiplier; final rate is lr0 times lrf."),
+            Arg(
+                help="Final learning-rate multiplier; final rate is the learning rate times lrf."
+            ),
         ] = 0.01,
         momentum: Annotated[
             float,
             Arg(help="SGD momentum or the first Adam beta coefficient."),
         ] = 0.937,
-        weight_decay: Annotated[
-            float,
-            Arg(help="Weight decay used for regularization."),
-        ] = 0.0005,
+        weight_decay: WeightDecay = None,
         warmup_epochs: Annotated[
             float,
             Arg(
@@ -586,8 +582,21 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
         wandb: Annotated[
             bool, Arg(help="Log training metrics to Weights & Biases.")
         ] = False,
+        imgsz: Annotated[int | None, Arg(help="Deprecated: use --resolution.")] = None,
+        lr0: Annotated[
+            float | None, Arg(help="Deprecated: use --learning-rate.")
+        ] = None,
     ):
         """Train this YOLO object detector."""
+        resolution = self._current_name("imgsz", "resolution", imgsz, resolution)
+        learning_rate = self._current_name("lr0", "learning_rate", lr0, learning_rate)
+        settings = self._settings_for_run(
+            epochs=epochs,
+            batch=batch,
+            resolution=resolution,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+        )
         return run_training_command(
             self,
             inputs,
@@ -599,9 +608,9 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
             prepare_inputs=prepare_object_detection_inputs,
             include_unlabelled=True,
             model=model,
-            epochs=epochs,
-            batch=batch,
-            imgsz=imgsz,
+            epochs=settings["epochs"],
+            batch=settings["batch"],
+            imgsz=settings["resolution"],
             early_stop=early_stop,
             preview=preview,
             rgb=rgb,
@@ -618,10 +627,10 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
             fraction=fraction,
             freeze=freeze,
             multi_scale=multi_scale,
-            lr0=lr0,
+            lr0=settings["learning_rate"],
             lrf=lrf,
             momentum=momentum,
-            weight_decay=weight_decay,
+            weight_decay=settings["weight_decay"],
             warmup_epochs=warmup_epochs,
             warmup_momentum=warmup_momentum,
             warmup_bias_lr=warmup_bias_lr,
@@ -730,7 +739,7 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
             if error.name != "drawyolo":
                 raise
             raise ImportError(
-                'YOLO previews require drawyolo. Install with: '
+                "YOLO previews require drawyolo. Install with: "
                 'pip install "collectra[yolo]"'
             ) from error
 
@@ -916,20 +925,11 @@ class ObjectDetectionYOLO(YOLOAdaptationCommands, YOLOTask):
         return train, val
 
     def _prepare_params(self, **kwargs) -> dict:
-        import platform
-
-        import torch
-
         params = {
             "name": kwargs["log"],
             "data": kwargs["config_file"],
             "project": kwargs["project"],
-            "device": kwargs.get("device")
-            or (
-                "mps"
-                if platform.system() == "Darwin"
-                else "cuda" if torch.cuda.is_available() else "cpu"
-            ),
+            "device": kwargs.get("device") or self._select_device(),
             "epochs": kwargs.get("epochs", 100),
             "imgsz": kwargs.get("imgsz", 640),
             "patience": kwargs.get("early_stop", 50),

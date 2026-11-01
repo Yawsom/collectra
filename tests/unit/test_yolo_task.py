@@ -109,10 +109,11 @@ def test_run_yolo(
     fake_models.YOLO = LoadingModel
     monkeypatch.setitem(sys.modules, "ultralytics.models", fake_models)
     task = ObjectDetectionYOLO(name="label-detector", model="configured.pt")
-    task.imgsz = configured_imgsz
+    if configured_imgsz is not None:
+        task.resolution = configured_imgsz
     if cropped:
         image = image.make_crop(0.5, 0.5, 0.5, 0.5)
-    detections = task.run(image, model=model, imgsz=imgsz)
+    detections = task.run(image, model=model, resolution=imgsz)
 
     expected_kwargs = {"iou": 0.7, "conf": 0.25}
     if expected_imgsz is not None:
@@ -132,14 +133,14 @@ def test_run_cli_model_override(model, imgsz):
     calls = []
     task.pipeline = SimpleNamespace(
         cli_run=lambda inputs, **kwargs: calls.append(
-            (inputs, kwargs, task.model, task.imgsz)
+            (inputs, kwargs, task.model, task.inference_resolution)
         )
     )
     argv = ["run", "image.jpg", "--output", "results", "--render"]
     if model is not None:
         argv.extend(["--model", model])
     if imgsz is not None:
-        argv.extend(["--imgsz", str(imgsz)])
+        argv.extend(["--resolution", str(imgsz)])
 
     invoke(task, argv)
 

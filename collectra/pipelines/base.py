@@ -29,11 +29,12 @@ import shutil
 import stat
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Annotated, Any, ClassVar
 
 from cappa import Arg
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 import graphviz
 import networkx as nx
 import yaml
@@ -55,6 +56,8 @@ from utils.get_types import get_param_types, get_return_type, unpack_types
 
 from ..commons.base import LenientAttributes, TaskContext
 from ..logger import get_logger
+from ..commons.results import Results, pop_header, put_header
+from ..resources.base import Resource
 from ..tasks.base import (
     Task,
     TaskNode,
@@ -164,10 +167,16 @@ class Pipeline(LenientAttributes, BaseModel):
     node_manager: NodeGraphManager = Field(default_factory=NodeGraphManager, repr=False)
     # The pipeline definition: every other keyword is a task or artefact entry.
     data: dict[str, Any] = Field(default_factory=dict, repr=False)
+    # Named helpers declared in the definition (lookups and the like); unlike
+    # tasks and artefacts they are not nodes of the graph.
+    resources: dict[str, Any] = Field(default_factory=dict, repr=False, exclude=True)
 
     # Runtime state of a run in progress.
     _stage_gate: StageGate | None = None
     _run_progress: RunProgress | None = None
+    # True when the file used the deprecated ``collectra_pipeline_metadata``
+    # block; saving then keeps that form rather than rewriting the file.
+    _legacy_declaration: bool = PrivateAttr(default=False)
 
     @field_validator("version", mode="before")
     @classmethod
@@ -202,7 +211,7 @@ class Pipeline(LenientAttributes, BaseModel):
                 **(pipeline_metadata or {}),
                 "name": name,
                 "ext": ext,
-                "version": version,
+                "version": str(version),
             },
             data=kwargs,
         )
@@ -219,19 +228,66 @@ class Pipeline(LenientAttributes, BaseModel):
 
     @classmethod
     def from_file(cls, pipeline_path: str | Path) -> "Pipeline":
-        """Load a pipeline from a directory or a pipeline YAML file."""
+        """Load a pipeline from a directory or a pipeline YAML file.
+
+        The file declares its pipeline as an entry whose ``type`` is
+        ``collectra.Pipeline`` (or a subclass of it); the entry's name is the
+        pipeline's name and its other keys are the pipeline's attributes.
+        The older ``collectra_pipeline_metadata`` block is still read, with a
+        warning that it is deprecated.
+        """
         path = Path(pipeline_path).expanduser().resolve()
         config_path = path / cls.PIPELINE_FILE if path.is_dir() else path
         with config_path.open() as stream:
-            metadata = yaml.safe_load(stream) or {}
-        initials = metadata.pop(cls.PIPELINE_METADATA_KEY)
-        return cls(
-            initials["name"],
-            initials["ext"],
-            initials["version"],
+            config = yaml.safe_load(stream) or {}
+        legacy = cls.PIPELINE_METADATA_KEY in config
+        if legacy:
+            attributes = config.pop(cls.PIPELINE_METADATA_KEY)
+            pipeline_class, name = cls, attributes.get("name")
+            warnings.warn(
+                f"{config_path} declares its pipeline with "
+                f"{cls.PIPELINE_METADATA_KEY!r}, which is deprecated. Replace it "
+                f"with an entry named {name!r} that has 'type: collectra.Pipeline' "
+                "and the same attributes (ext, version, ...), as the first item.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        else:
+            name, pipeline_class = cls._find_declaration(config, config_path)
+            attributes = {
+                key: value for key, value in config.pop(name).items() if key != "type"
+            }
+        for required in ("ext", "version"):
+            if required not in attributes:
+                raise ValueError(
+                    f"Pipeline {name!r} in {config_path} needs a {required!r}"
+                )
+        pipeline = pipeline_class(
+            name,
+            attributes["ext"],
+            attributes["version"],
             path=config_path.parent,
-            pipeline_metadata=initials,
-            **metadata,
+            pipeline_metadata=attributes,
+            **config,
+        )
+        pipeline._legacy_declaration = legacy
+        return pipeline
+
+    @classmethod
+    def _find_declaration(cls, config: dict, config_path: Path) -> tuple[str, type]:
+        """The name and class of the entry that declares the pipeline itself."""
+        for name, value in config.items():
+            if not isinstance(value, dict) or not isinstance(value.get("type"), str):
+                continue
+            try:
+                declared = load_class_from_string(value["type"])
+            except (ImportError, AttributeError):
+                continue  # a task whose class cannot be loaded is reported on connect
+            if isinstance(declared, type) and issubclass(declared, Pipeline):
+                return name, declared
+        raise ValueError(
+            f"{config_path} does not declare a pipeline. Add an entry such as:\n"
+            "MyPipeline:\n  type: collectra.Pipeline\n  ext: my\n  version: 1.0"
         )
 
     @command(name="run")
@@ -289,8 +345,15 @@ class Pipeline(LenientAttributes, BaseModel):
 
     @command(name="gui")
     def launch_gui(
-        self, *inputs: Path, debug: bool = False,
-        max_pixels: Annotated[int, Arg(help="Maximum image and mask preview dimension in pixels (longest edge). Originals remain full resolution.")] = 4096,
+        self,
+        *inputs: Path,
+        debug: bool = False,
+        max_pixels: Annotated[
+            int,
+            Arg(
+                help="Maximum image and mask preview dimension in pixels (longest edge). Originals remain full resolution."
+            ),
+        ] = 4096,
     ) -> None:
         """Open the GUI with optional result folders, results.yaml files, or parent directories."""
         from collectra.gui.backend import start
@@ -381,8 +444,7 @@ class Pipeline(LenientAttributes, BaseModel):
         # Kernel shebang parsing cannot quote an interpreter path containing
         # spaces. Let the shell invoke the exact interpreter as one argument.
         launcher.write_text(
-            "#!/bin/sh\n"
-            f'exec {shlex.join([sys.executable, "-c", code])} "$@"\n',
+            "#!/bin/sh\n" f'exec {shlex.join([sys.executable, "-c", code])} "$@"\n',
             encoding="utf-8",
         )
         launcher.chmod(
@@ -406,7 +468,9 @@ class Pipeline(LenientAttributes, BaseModel):
         """
         from .app_launcher import install_app
 
-        pipeline_icon = self.pipeline_metadata.get("icon") or self.pipeline_metadata.get("logo")
+        pipeline_icon = self.pipeline_metadata.get(
+            "icon"
+        ) or self.pipeline_metadata.get("logo")
         if icon is None and pipeline_icon:
             icon = Path(pipeline_icon).expanduser()
             if not icon.is_absolute():
@@ -899,18 +963,16 @@ class Pipeline(LenientAttributes, BaseModel):
     def _create_results_file(self, directory: Path, key: str, value: str | Path):
         """Create a new results.yaml file in the given directory."""
         with change_dir(directory):
-            results = {
-                self.METADATA_KEY: {
-                    "workflow": self.name,
-                    "version": self.version,
-                    "timestamp": datetime.datetime.now().isoformat(),
+            results = put_header(
+                Results(workflow=self.name, version=self.version),
+                {
+                    key: {
+                        "type": "collectra.Image",
+                        "id": f"{key}",
+                        "data": value.name if isinstance(value, Path) else str(value),
+                    },
                 },
-                key: {
-                    "type": "collectra.Image",
-                    "id": f"{key}",
-                    "data": value.name if isinstance(value, Path) else str(value),
-                },
-            }
+            )
             self._write_results_file(results)
 
     def _populate_active_paths(
@@ -1056,21 +1118,21 @@ class Pipeline(LenientAttributes, BaseModel):
         if resultsf.exists():
             with open(resultsf, "r") as f:
                 results = yaml.safe_load(f)
-            results[self.METADATA_KEY][
-                "timestamp"
-            ] = datetime.datetime.now().isoformat()
+            # Rewriting the file brings an old-style header up to date, and
+            # refreshes its timestamp.
+            results = put_header(
+                pop_header(results, source=resultsf.resolve()), results
+            )
         else:
-            results = {
-                self.METADATA_KEY: {
-                    "workflow": self.name,
-                    "version": self.version,
-                    "timestamp": datetime.datetime.now().isoformat(),
+            results = put_header(
+                Results(workflow=self.name, version=self.version),
+                {
+                    key: {
+                        "type": "collectra.Image",
+                        "data": value.name if isinstance(value, Path) else str(value),
+                    },
                 },
-                key: {
-                    "type": "collectra.Image",
-                    "data": value.name if isinstance(value, Path) else str(value),
-                },
-            }
+            )
 
         return results
 
@@ -1547,13 +1609,33 @@ class Pipeline(LenientAttributes, BaseModel):
 
     @property
     def metadata(self) -> dict:
-        """Get pipeline metadata dictionary.
+        """The pipeline's declaration, as it is written at the top of pipeline.yaml.
 
         Returns:
-            Dictionary containing pipeline name, extension, and version
-            under the PIPELINE_METADATA_KEY.
+            The pipeline entry (``{name: {type, ext, version, ...}}``), or for a
+            file that still uses the deprecated form, its metadata block.
         """
-        return {self.PIPELINE_METADATA_KEY: self.pipeline_metadata.copy()}
+        if self._legacy_declaration:
+            return {self.PIPELINE_METADATA_KEY: self.pipeline_metadata.copy()}
+        extras = {
+            key: value
+            for key, value in self.pipeline_metadata.items()
+            if key not in ("name", "ext", "version")
+        }
+        cls = type(self)
+        declared_type = (
+            "collectra.Pipeline"
+            if cls is Pipeline
+            else f"{cls.__module__}.{cls.__qualname__}"
+        )
+        return {
+            self.name: {
+                "type": declared_type,
+                "ext": self.ext,
+                "version": self.version,
+                **extras,
+            }
+        }
 
     def gui_graph(self) -> dict:
         """Return the live workflow graph in the shape expected by the GUI."""
@@ -1607,6 +1689,8 @@ class Pipeline(LenientAttributes, BaseModel):
                 with open(self.PIPELINE_FILE, "r") as f:
                     file_data = yaml.safe_load(f) or dict()
                     file_data.pop(self.PIPELINE_METADATA_KEY, None)
+                    if self.name not in self.data:
+                        file_data.pop(self.name, None)  # the pipeline's own entry
                 # compare diffs between current data and file data, prioritizing file data for any keys that exist in both
                 data_diff = dict()
                 for key, data in file_data.items():
@@ -1685,6 +1769,18 @@ class Pipeline(LenientAttributes, BaseModel):
         with change_dir(self.path):
             self._build_nodes_and_relations(relations)
             self._create_graph_edges(relations)
+            for node in self.node_manager.get_task_nodes():
+                node.get_task().validate_resources(self.resources)
+
+    def resource(self, name: str):
+        """The resource declared under ``name`` (available once connected)."""
+        try:
+            return self.resources[name]
+        except KeyError:
+            raise KeyError(
+                f"No resource named {name!r}. Available: "
+                f"{', '.join(sorted(self.resources)) or 'none'}"
+            ) from None
 
     def _build_nodes_and_relations(self, relations: dict):
         """Build workflow nodes and track their relationships."""
@@ -1695,6 +1791,11 @@ class Pipeline(LenientAttributes, BaseModel):
 
             cls_ = load_class_from_string(data.pop("type"))
             data = self._check_data_assignment(self.data, data)
+            if issubclass(cls_, Resource):
+                # Kept by name, reused across connects, and never a graph node.
+                if type(self.resources.get(name)) is not cls_:
+                    self.resources[name] = cls_(name, **data)
+                continue
             obj = self._create_or_reuse_object(name, cls_, data)
 
             if isinstance(obj, Task):

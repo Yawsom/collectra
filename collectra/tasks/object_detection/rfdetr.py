@@ -11,6 +11,16 @@ from cappa import Arg
 
 from collectra.cli import command
 from .adaptation_commands import RFDETRAdaptationCommands
+from .base import (
+    Batch,
+    Epochs,
+    LearningRate,
+    ObjectDetectionTask,
+    RunResolution,
+    Threshold,
+    TrainResolution,
+    WeightDecay,
+)
 from collectra.types.images import (
     Image,
     ImageCrop,
@@ -30,7 +40,6 @@ from ..machine_learning.training import (
     print_distribution_table,
     run_training_command,
 )
-from .batching import image_cache_key
 from .detr import DetectionTrainResult
 
 if TYPE_CHECKING:
@@ -115,12 +124,11 @@ def load_rfdetr_model(model_path: str | Path) -> RFDETR:
     logger.error("Failed to load RF-DETR model from %s. Errors: %s", model_path, errors)
 
 
-class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
+class ObjectDetectionRFDETR(RFDETRAdaptationCommands, ObjectDetectionTask):
     """RF-DETR task backed by the Roboflow rfdetr package."""
 
     model: Any = None  # a path or a loaded RF-DETR model
     original_model_path: str | Path | None = None
-    resolution: int | None = None
     batch_size: int = Field(default=1, ge=1)
 
     def __init__(
@@ -132,17 +140,6 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
         super().__init__(name, model=model, **kwargs)
         self._device = None
         self._categories: list[str] = []
-
-    def _select_device(self) -> str:
-        import platform
-
-        import torch
-
-        return (
-            "mps"
-            if platform.system() == "Darwin"
-            else "cuda" if torch.cuda.is_available() else "cpu"
-        )
 
     def _init_model(self) -> None:
         self._load()
@@ -268,12 +265,8 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
             Path | None,
             Arg(help="Model checkpoint path. Omit to keep the configured model."),
         ] = None,
-        resolution: Annotated[
-            int | None,
-            Arg(
-                help="Inference resolution in pixels. Omit to use the resolution stored in the model."
-            ),
-        ] = None,
+        resolution: RunResolution = None,
+        threshold: Threshold = None,
         batch_size: Annotated[
             int,
             Arg(
@@ -294,6 +287,8 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
             self.model = model
         if resolution is not None:
             self.resolution = resolution
+        if threshold is not None:
+            self.threshold = threshold
         self.batch_size = batch_size
         super().cli_run(
             inputs,
@@ -306,7 +301,7 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
 
     def _predict(self, images: list[Image]) -> list[tuple]:
         """Run the model over ``images`` together as ``(detections, width, height)``."""
-        threshold = float(getattr(self, "threshold", 0.5))
+        threshold = self.threshold
         inputs = []
         sizes = []
         for image in images:
@@ -320,8 +315,9 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
             sizes.append((width, height))
 
         kwargs = {}
-        if self.resolution is not None:
-            kwargs["shape"] = (int(self.resolution), int(self.resolution))
+        resolution = self.inference_resolution
+        if resolution is not None:
+            kwargs["shape"] = (int(resolution), int(resolution))
         detections = self.model.predict(
             inputs if len(inputs) > 1 else inputs[0],
             threshold=threshold,
@@ -332,27 +328,15 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
             detections = [detections]
         return [(d, w, h) for d, (w, h) in zip(detections, sizes)]
 
-    @threading_locked()
-    def prefetch(self, entries: list[list]) -> None:
-        """Run the model over many images in batches, caching results for ``run``."""
-        self._init_model()
-        images = [
-            entry[0]
-            for entry in entries
-            if len(entry) == 1 and isinstance(entry[0], Image)
-        ]
-        self._prefetched = {}
+    def _predict_batch(self, images: list[Image]) -> list[tuple]:
+        return self._predict(images)
+
+    def _before_prefetch(self) -> None:
         logger.info(
             "RF-DETR inference resolution: %s",
-            self.resolution or getattr(self.model.model_config, "resolution", "model default"),
+            self.inference_resolution
+            or getattr(self.model.model_config, "resolution", "model default"),
         )
-        for start in range(0, len(images), self.batch_size):
-            batch = images[start : start + self.batch_size]
-            for image, predicted in zip(batch, self._predict(batch)):
-                self._prefetched[image_cache_key(image, self.resolution)] = predicted
-
-    def clear_prefetch(self) -> None:
-        self._prefetched = {}
 
     @threading_locked()
     def run(self, *args: Image) -> list[Image]:
@@ -364,9 +348,7 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
         image = args[0]
         self._init_model()
 
-        predicted = getattr(self, "_prefetched", {}).pop(
-            image_cache_key(image, self.resolution), None
-        )
+        predicted = self._take_prefetched(image)
         detections, width, height = predicted or self._predict([image])[0]
 
         confidences = getattr(detections, "confidence", None)
@@ -707,8 +689,10 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
         from .rfdetr_curves import wandb_detection_curves
 
         model = self.model
-        with multichannel_datasets(), multichannel_checkpoints(), wandb_detection_curves(
-            params["wandb"] and bool(val_samples), log, classes
+        with (
+            multichannel_datasets(),
+            multichannel_checkpoints(),
+            wandb_detection_curves(params["wandb"] and bool(val_samples), log, classes),
         ):
             model.train(
                 dataset_dir=str(dataset_dir),
@@ -770,24 +754,15 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
             str,
             Arg(help="Partition value identifying examples to exclude from training."),
         ] = "",
-        epochs: Annotated[
-            int,
-            Arg(help="Number of training epochs."),
-        ] = 1,
-        batch: Annotated[
-            int,
-            Arg(help="Number of images per device in each training batch."),
-        ] = 4,
+        epochs: Epochs = None,
+        batch: Batch = None,
         grad_accum_steps: Annotated[
             int,
             Arg(
                 help="Accumulate gradients over this many batches before an optimizer step."
             ),
         ] = 4,
-        learning_rate: Annotated[
-            float,
-            Arg(help="Learning rate for training."),
-        ] = 1e-4,
+        learning_rate: LearningRate = None,
         rgb: Annotated[
             bool,
             Arg(
@@ -802,10 +777,7 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
             bool,
             Arg(help="Stop training when validation performance stops improving."),
         ] = False,
-        weight_decay: Annotated[
-            float,
-            Arg(help="Weight decay used for regularization."),
-        ] = 1e-4,
+        weight_decay: WeightDecay = None,
         drop_path: Annotated[
             float,
             Arg(help="Stochastic depth drop probability used for regularization."),
@@ -890,10 +862,7 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
                 help="Checkpoint path or pretrained variant: nano, small, base, medium, large, xlarge, or 2xlarge (full RFDETR class names also accepted). XL variants require rfdetr[plus]. 'default' selects Base; omit to keep the configured model."
             ),
         ] = "",
-        resolution: Annotated[
-            float | None,
-            Arg(help="Change default resolution. Valid options will depend on the model type."),
-        ] = None,
+        resolution: TrainResolution = None,
         max_items: Annotated[
             int,
             Arg(
@@ -902,6 +871,13 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
         ] = 0,
     ):
         """Train this RF-DETR object detector."""
+        settings = self._settings_for_run(
+            epochs=epochs,
+            batch=batch,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            resolution=resolution,
+        )
         return run_training_command(
             self,
             inputs,
@@ -912,14 +888,14 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
             exclude=exclude,
             prepare_inputs=prepare_object_detection_inputs,
             include_unlabelled=True,
-            epochs=epochs,
-            batch=batch,
+            epochs=settings["epochs"],
+            batch=settings["batch"],
             grad_accum_steps=grad_accum_steps,
-            lr=learning_rate,
+            lr=settings["learning_rate"],
             rgb=rgb,
             wandb=wandb,
             early_stopping=early_stopping,
-            weight_decay=weight_decay,
+            weight_decay=settings["weight_decay"],
             drop_path=drop_path,
             augmentation=augmentation,
             augmentation_backend=augmentation_backend,
@@ -938,7 +914,7 @@ class ObjectDetectionRFDETR(RFDETRAdaptationCommands, Task):
             lr_component_decay=lr_component_decay,
             warmup_epochs=warmup_epochs,
             model=model,
-            resolution=resolution,
+            resolution=settings["resolution"],
             max_items=max_items,
         )
 

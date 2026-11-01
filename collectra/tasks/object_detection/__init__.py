@@ -5,6 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 
 _EXPORTS = {
+    "ObjectDetectionTask": "collectra.tasks.object_detection.base",
     "ObjectDetectionYOLO": "collectra.tasks.object_detection.yolo",
     "ObjectDetectionDETR": "collectra.tasks.object_detection.detr",
     "DetectionTrainResult": "collectra.tasks.object_detection.detr",

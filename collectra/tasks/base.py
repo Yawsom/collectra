@@ -62,6 +62,13 @@ class Task(LenientAttributes, EntityMixin, BaseModel, Generic[T]):
     def attributes_to_ignore(self) -> set:
         return super().attributes_to_ignore() | {"pipeline", "context"}
 
+    def validate_resources(self, resources: dict[str, Any]) -> None:
+        """Check that the pipeline resources this task refers to exist.
+
+        Called when the pipeline connects. Tasks that name resources override
+        this to raise a clear error early rather than fail on the first file.
+        """
+
     # Tasks are stateful, long-lived objects held by graph nodes: compare by identity.
     def __eq__(self, other: object) -> bool:
         return self is other

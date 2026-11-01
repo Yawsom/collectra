@@ -189,13 +189,13 @@ def test_collectra_tiff_inference_and_fusion_channel_check(
 
     monkeypatch.setattr(DetectionPredictor, "preprocess", capture)
     task = ObjectDetectionYOLO("fusion", model=path)
-    assert isinstance(task.run(Image(name="views", data=image_path), imgsz=64), list)
+    assert isinstance(task.run(Image(name="views", data=image_path), resolution=64), list)
     assert isinstance(task.model, FeatureFusionYOLO)
     assert observed == [torch.Size([1, 6, 64, 64])]
     gray = tmp_path / "gray.tif"
     tifffile.imwrite(gray, np.zeros((48, 64), dtype=np.uint8))
     with pytest.raises(ValueError, match="1 image channels.*expects 6"):
-        task.run(Image(name="gray", data=gray), imgsz=64)
+        task.run(Image(name="gray", data=gray), resolution=64)
 
 
 @pytest.mark.parametrize("views, reference, hidden", [(0, 0, 4), (2, 2, 4), (2, 0, 0)])

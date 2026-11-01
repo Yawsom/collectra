@@ -66,7 +66,7 @@ def test_tiff_inference_preserves_channels(
 
     monkeypatch.setattr(DetectionPredictor, "preprocess", capture_preprocess)
     task = ObjectDetectionYOLO("detector", model=multichannel_yolo)
-    results = task.run(image, imgsz=64)
+    results = task.run(image, resolution=64)
 
     assert len(observed) == 1
     assert observed[0][0:2] == (1, 75)
@@ -80,4 +80,4 @@ def test_tiff_inference_reports_channel_mismatch(tmp_path, multichannel_yolo):
     task = ObjectDetectionYOLO("detector", model=multichannel_yolo)
 
     with pytest.raises(ValueError, match="1 image channels.*expects 75"):
-        task.run(Image(name="gray", data=path), imgsz=64)
+        task.run(Image(name="gray", data=path), resolution=64)

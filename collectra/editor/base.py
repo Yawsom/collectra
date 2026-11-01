@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 from jinja2 import Environment, PackageLoader, select_autoescape
 
+from collectra.commons.results import pop_header
 from collectra.utils import change_dir
 
 __all__ = ["Editor"]
@@ -32,7 +33,7 @@ class Editor(BaseModel):
                 raise Exception(f"{self.file} is an invalid file. Exiting...")
             with open(results, "r") as f:
                 data = yaml.safe_load(f)
-            header = data.pop("collectra_results_metadata", "")
+            header = pop_header(data, source=results)
             src_img = ""
             bounding_boxes: list = list()
             text_items: list = list()

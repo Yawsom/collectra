@@ -1,33 +1,14 @@
 import uuid
-from datetime import datetime
 from pathlib import Path
 
 import pydantic
 
 from ..types.base import load_artefact
 from ..utils import write_yaml
+from .results import Results, pop_header, put_header
 
-
-class CollectraResultsMetadata(pydantic.BaseModel):
-    # Some results.yaml files have an unquoted version (e.g. `version: 1.0`),
-    # which PyYAML parses as a float rather than a str.
-    model_config = pydantic.ConfigDict(coerce_numbers_to_str=True)
-
-    workflow: str | None = None
-    version: str | None = None
-    partition: str | None = None
-    timestamp: str | None = None
-
-    def model_dump(self, *args, **kwargs) -> dict:
-        data = super().model_dump(*args, **kwargs)
-        data["timestamp"] = datetime.now().isoformat()
-        if self.partition is None:
-            data.pop("partition")
-        if self.workflow is None:
-            data.pop("workflow")
-        if self.version is None:
-            data.pop("version")
-        return data
+# The header used to be called this; the name still works.
+CollectraResultsMetadata = Results
 
 
 class CollectraFile(pydantic.BaseModel):
@@ -50,21 +31,17 @@ class CollectraFile(pydantic.BaseModel):
         return self.collectra_file_path / "results.yaml"
 
     def model_dump(self, *args, **kwargs) -> dict:
-        data = super().model_dump(*args, **kwargs)
-        data["collectra_results_metadata"] = self.collectra_results_metadata.model_dump(
-            *args, **kwargs
-        )
-        for key, value in data["data"].items():
-            data[key] = (
+        """What is written to results.yaml: the header, then each node."""
+        data = super().model_dump(*args, **kwargs)["data"]
+        nodes = {
+            key: (
                 value
                 if not isinstance(value, list)
-                else value[0] if isinstance(value, list) and len(value) == 1 else value
+                else value[0] if len(value) == 1 else value
             )
-        data.pop("data")
-        data.pop("assets")
-        data.pop("cleanup_on_save_failure")
-        data.pop("collectra_file_path")
-        return data
+            for key, value in data.items()
+        }
+        return put_header(self.collectra_results_metadata, nodes)
 
     @classmethod
     def from_data(cls, collectra_file_path: Path | str):
@@ -78,9 +55,7 @@ class CollectraFile(pydantic.BaseModel):
             data = yaml.safe_load(f) or {}
         if not isinstance(data, dict):
             raise ValueError(f"Invalid results data in {results_yaml}")
-        metadata = CollectraResultsMetadata(
-            **data.pop("collectra_results_metadata", {})
-        )
+        metadata = pop_header(data, source=results_yaml)
         return cls(
             collectra_file_path=collectra_file_path,
             collectra_results_metadata=metadata,

@@ -44,8 +44,8 @@ fractions or integer counts; use one format throughout, with a total of at most
 ``--val`` assigns the label ``val``; ``--validation`` assigns ``validation``.
 Custom labels use repeated ``--partition NAME=VALUE`` options.
 
-The command updates ``collectra_results_metadata.partition`` in each selected
-result. Results left over after the specified allocations keep their existing
+The command updates the ``partition`` of the ``results`` entry (the file's
+header) in each selected result. Results left over after the specified allocations keep their existing
 partition. Inputs are sorted before shuffling, so a fixed seed reproduces the
 same assignment for the same set of results.
 

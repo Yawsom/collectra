@@ -18,16 +18,18 @@ __all__ = ["LLM"]
 
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 import os
 import re
 from functools import cached_property
 from pathlib import Path
+from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.output_parsers import StrOutputParser
-from pydantic import BaseModel, Field, create_model, field_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from collectra.tasks.text_output import TextOutputTask
 from collectra.types.images import Image
@@ -36,8 +38,29 @@ from collectra.types.texts import Text
 from ..logger import get_logger
 
 
-class StructuredOutputUnsupported(RuntimeError):
+class LLMSetupError(RuntimeError):
+    """The task cannot run as configured; raised, not logged page by page."""
+
+
+class StructuredOutputUnsupported(LLMSetupError):
     """The model cannot produce structured output (it has no tool calling)."""
+
+
+class ToolCallingUnsupported(LLMSetupError):
+    """The model cannot call tools, which a task with ``tools`` needs."""
+
+
+class ToolConversation(BaseModel):
+    """A finished exchange in which the model may have called tools.
+
+    ``replies`` are every model turn, kept so their token usage can be recorded;
+    ``final`` is the turn that holds the answer.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    final: Any
+    replies: list[Any]
 
 
 def _as_text(cls, value):
@@ -86,6 +109,11 @@ class LLM(TextOutputTask):
             structured form: one string field per node, named after the node,
             and every node gets a Text (empty when the model found nothing).
             The prompt template is where each field is described.
+        tools: Names of pipeline resources (such as ``EntityLookup``) the model
+            may call before answering. A task with tools needs a model that
+            supports tool calling. With several outputs the answer is given by
+            calling one more tool, whose fields are the outputs.
+        max_tool_calls (int): The most lookups the model may make per prompt.
     """
 
     def __init__(self, name: str, model: str, **kwargs):
@@ -107,6 +135,13 @@ class LLM(TextOutputTask):
         self._prefetched: dict[str, list] = {}
         if len(self.output_names) != len(set(self.output_names)):
             raise ValueError(f"LLM task {name!r} lists the same output more than once")
+        tools = kwargs.get("tools")
+        self.tools = (
+            [tools] if isinstance(tools, str) else [str(t) for t in tools or []]
+        )
+        self.max_tool_calls = int(kwargs.get("max_tool_calls", 5))
+        if self.max_tool_calls < 1:
+            raise ValueError(f"LLM task {name!r} needs max_tool_calls >= 1")
 
         init_messages = (
             SystemMessage(content=kwargs.get("system", ""))
@@ -171,6 +206,97 @@ class LLM(TextOutputTask):
     @property
     def chain(self):
         return self.structured_llm if self.is_structured else self.llm
+
+    def validate_resources(self, resources: dict[str, Any]) -> None:
+        """Fail early, when the pipeline connects, if a named tool does not exist."""
+        for tool in self.tools:
+            if tool not in resources:
+                raise ValueError(
+                    f"Task {self.name!r} uses unknown tool {tool!r}. "
+                    f"Available tools: {', '.join(sorted(resources)) or 'none'}"
+                )
+
+    def _tool_objects(self) -> dict[str, Any]:
+        """The task's tools by name, taken from the pipeline's resources."""
+        if self.pipeline is None:
+            raise LLMSetupError(
+                f"LLM task {self.name!r} uses tools but is not part of a pipeline"
+            )
+        tools = [self.pipeline.resource(name).as_tool() for name in self.tools]
+        return {tool.name: tool for tool in tools}
+
+    def _use_tool(self, tools: dict, call: dict, allowed: bool) -> str:
+        """Run one tool call the model made; any failure is told to the model."""
+        name = call["name"]
+        if name not in tools:
+            return f"Unknown tool {name!r}. Available tools: {', '.join(tools)}"
+        if not allowed:
+            return (
+                f"Lookup limit reached ({self.max_tool_calls}). "
+                "Give your final answer now, without further lookups."
+            )
+        logger.info("Task '%s' called %s(%s)", self.name, name, call["args"])
+        try:
+            return str(tools[name].invoke(call["args"]))
+        except Exception as error:
+            return f"Lookup failed: {error}"
+
+    def _converse(self, messages: list) -> ToolConversation:
+        """Let the model call tools until it gives a final answer.
+
+        Works on a copy of ``messages``, so concurrent conversations (batching)
+        do not share state. Lookups past ``max_tool_calls`` are refused with a
+        message, and a model that still will not answer gives up with an error.
+        """
+        tools = self._tool_objects()
+        try:
+            # With several outputs the answer itself is a tool call: the model
+            # is free to look things up first and submits when it is done.
+            answer_tool = self.output_model.__name__
+            offered = list(tools.values())
+            bound = self.llm.bind_tools(
+                offered + [self.output_model] if self.is_structured else offered
+            )
+        except NotImplementedError as error:
+            raise ToolCallingUnsupported(
+                f"LLM task {self.name!r} uses tools, but model {self.model!r} "
+                "does not support tool calling. Use a model that does, or remove "
+                "the tools."
+            ) from error
+        conversation, replies, lookups = list(messages), [], 0
+        for _ in range(self.max_tool_calls + 3):
+            reply = bound.invoke(conversation)
+            replies.append(reply)
+            calls = getattr(reply, "tool_calls", None) or []
+            if self.is_structured:
+                submitted = next((c for c in calls if c["name"] == answer_tool), None)
+                if submitted:
+                    parsed = self.output_model.model_validate(submitted["args"])
+                    final = {"raw": reply, "parsed": parsed}
+                    return ToolConversation(final=final, replies=replies)
+            elif not calls:
+                return ToolConversation(final=reply, replies=replies)
+            conversation.append(reply)
+            for call in reply.tool_calls:
+                allowed = lookups < self.max_tool_calls
+                lookups += allowed
+                conversation.append(
+                    ToolMessage(
+                        content=self._use_tool(tools, call, allowed),
+                        tool_call_id=call["id"],
+                        name=call["name"],
+                    )
+                )
+            if not calls:
+                conversation.append(
+                    HumanMessage(
+                        content=f"Give your answer by calling the {answer_tool} tool."
+                    )
+                )
+        raise RuntimeError(
+            f"LLM task {self.name!r}: the model did not give a final answer "
+            f"after {lookups} lookups"
+        )
 
     def _is_unreadable(self, response) -> bool:
         """A structured reply the schema could not parse (or a failed call)."""
@@ -296,6 +422,9 @@ class LLM(TextOutputTask):
                 )
                 continue
             prompts.append((self._cache_key(content), list(self.messages)))
+        if self.tools:
+            self._prefetch_conversations(prompts)
+            return
         for start in range(0, len(prompts), self.batch_size):
             batch = prompts[start : start + self.batch_size]
             responses = self.chain.batch(
@@ -312,6 +441,32 @@ class LLM(TextOutputTask):
                     )
                     continue
                 self._prefetched.setdefault(key, []).append(response)
+
+    def _prefetch_conversations(self, prompts: list[tuple[str, list]]) -> None:
+        """Run the tool conversations for many prompts side by side.
+
+        Each conversation is several model turns, so the one-call batch API does
+        not apply; they run in threads, ``batch_size`` at a time. A conversation
+        that fails is left for ``run`` to retry on its own.
+        """
+        if not prompts:
+            return
+        self.llm  # load the model once, before the threads need it
+        with ThreadPoolExecutor(max_workers=min(self.batch_size, len(prompts))) as pool:
+            futures = [pool.submit(self._converse, messages) for _, messages in prompts]
+            for (key, _), future in zip(prompts, futures):
+                try:
+                    conversation = future.result()
+                except ToolCallingUnsupported:
+                    raise
+                except Exception as error:
+                    logger.warning(
+                        "LLM task '%s' conversation failed, will retry alone: %s",
+                        self.name,
+                        error,
+                    )
+                    continue
+                self._prefetched.setdefault(key, []).append(conversation)
 
     def clear_prefetch(self) -> None:
         self._prefetched = {}
@@ -333,33 +488,44 @@ class LLM(TextOutputTask):
             values[name] = "" if value in ('""', "''") else value.strip()
         return values
 
+    def _record_usage(self, raw) -> None:
+        """Add one model reply's token usage to the usage file, if one is in use."""
+        if not self.context.usage_file:
+            return
+        usage = get_llmloader().LLMWrapper.get_token_count(raw)
+        usage_file = self.context.usage_file
+        data = {f"{self.name}": usage}
+        old_data = {}
+        if usage_file.exists():
+            with open(usage_file, "r") as f:
+                old_data = yaml.safe_load(f) or dict()
+        for key, value in old_data.items():
+            if key not in data:
+                data[key] = value
+            else:
+                for item, item_value in value.items():
+                    data[key][item] = data.get(key, {}).get(item, 0) + item_value
+        usage_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(usage_file, "w") as f:
+            yaml.dump(data, f)
+
     def invoke(self, response=None) -> str | dict[str, str]:
         """Ask the model (unless ``response`` is already in hand) and read the reply.
 
         Returns text for a single output, or ``{node name: text}`` for several.
         """
         if response is None:
-            response = self.chain.invoke(self.messages)
+            if self.tools:
+                response = self._converse(self.messages)
+            else:
+                response = self.chain.invoke(self.messages)
 
-        # Use context for usage tracking instead of environment variable
-        if self.context.usage_file:
-            raw = response["raw"] if self.is_structured else response
-            usage = get_llmloader().LLMWrapper.get_token_count(raw)
-            usage_file = self.context.usage_file
-            data = {f"{self.name}": usage}
-            old_data = {}
-            if usage_file.exists():
-                with open(usage_file, "r") as f:
-                    old_data = yaml.safe_load(f) or dict()
-            for key, value in old_data.items():
-                if key not in data:
-                    data[key] = value
-                else:
-                    for item, item_value in value.items():
-                        data[key][item] = data.get(key, {}).get(item, 0) + item_value
-            usage_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(usage_file, "w") as f:
-                yaml.dump(data, f)
+        if isinstance(response, ToolConversation):
+            for reply in response.replies:
+                self._record_usage(reply)
+            response = response.final
+        else:
+            self._record_usage(response["raw"] if self.is_structured else response)
 
         if self.is_structured:
             return self._fields(response)
@@ -397,7 +563,7 @@ class LLM(TextOutputTask):
                     for node, value in response.items()
                 ]
             return self.text_output(response)
-        except StructuredOutputUnsupported:
+        except LLMSetupError:
             raise  # a setup problem, not a bad reply: say so rather than log per page
         except Exception as e:
             logger.error("LLM task '%s' failed: %s", self.name, e, exc_info=True)

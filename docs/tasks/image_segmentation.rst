@@ -11,8 +11,8 @@ predictions to their existing mask.
 
 .. code-block:: yaml
 
-    collectra_pipeline_metadata:
-      name: Segmentation
+    Segmentation:
+      type: collectra.Pipeline
       ext: collectra
       version: "1.0"
     segment:

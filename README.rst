@@ -169,8 +169,8 @@ Save this as ``pipeline.yaml``:
 
 .. code-block:: yaml
 
-    collectra_pipeline_metadata:
-      name: printed-pages
+    printed-pages:
+      type: collectra.Pipeline
       ext: collectra
       version: "1.0"
 
@@ -179,6 +179,12 @@ Save this as ``pipeline.yaml``:
       input: page
       output: lines
       deskew: true
+
+The first entry declares the pipeline itself: its key is the pipeline's name,
+``type`` is ``collectra.Pipeline`` (or your own subclass of it), and the other
+keys (``ext``, ``version``, ``logo``, ``theme``...) are its attributes. Older
+files that use a ``collectra_pipeline_metadata:`` block with a ``name:`` inside
+still load, but that form is deprecated and gives a warning.
 
 This pipeline detects lines of printed text without loading a pretrained model.
 Run the commands below from ``my-project``.
@@ -336,8 +342,8 @@ separate pipeline as ``classifier/pipeline.yaml``:
 
 .. code-block:: yaml
 
-    collectra_pipeline_metadata:
-      name: specimen-classifier
+    specimen-classifier:
+      type: collectra.Pipeline
       ext: collectra
       version: "1.0"
 
@@ -349,12 +355,14 @@ separate pipeline as ``classifier/pipeline.yaml``:
 
 Prepare annotated ``*.collectra`` result directories under ``training-data``.
 For classification, each label is a ``Link`` named after an output class and
-linked to its source image or crop. Set the result metadata's ``partition`` to
-``validation`` for held-out examples. A minimal annotated ``results.yaml`` is:
+linked to its source image or crop. Set the ``partition`` of the file's
+``results`` entry to ``validation`` for held-out examples. A minimal annotated
+``results.yaml`` is:
 
 .. code-block:: yaml
 
-    collectra_results_metadata:
+    results:
+      type: collectra.Results
       partition: validation
 
     image:
@@ -366,6 +374,13 @@ linked to its source image or crop. Set the result metadata's ``partition`` to
       type: collectra.Link
       id: label-001
       parents: image-001
+
+The first entry, ``results``, describes the file itself (its ``partition``,
+``timestamp`` and so on). It is a ``collectra.Results``, which you can subclass to
+record more. Older files that begin with a ``collectra_results_metadata:`` mapping
+still load, but that form is deprecated and gives a warning; Collectra updates a
+file when it next saves it, and ``scripts/upgrade_results_files.py`` updates many
+files at once.
 
 Place ``specimen.png`` alongside this file. Provide training examples for each
 class as well, using a different partition such as ``training``. Detection

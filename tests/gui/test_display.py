@@ -520,3 +520,53 @@ class Measurement(Artefact):
     error = backend.get_artefact_display("example")
     assert not error["success"]
     assert "measurement.js" in error["error"]
+
+
+def results_file(tmp_path, name, header):
+    folder = tmp_path / f"{name}.collectra"
+    folder.mkdir()
+    (folder / "results.yaml").write_text(
+        yaml.safe_dump(
+            {
+                **header,
+                "text": {"type": "collectra.Text", "id": "text", "data": "before"},
+            },
+            sort_keys=False,
+        )
+    )
+    return folder / "results.yaml"
+
+
+def test_a_page_with_the_new_results_header_opens_and_saves_it_back(backend, tmp_path):
+    path = results_file(
+        tmp_path,
+        "new",
+        {"results": {"type": "collectra.Results", "partition": "validation"}},
+    )
+    assert backend.load_yaml(str(path))["success"]
+    assert backend._graph.nodes == ["text"]  # the header is not a node
+    assert backend.update_display_text("text", "after", str(path))["success"]
+    saved = yaml.safe_load(path.read_text())
+    assert list(saved) == ["results", "text"]
+    assert saved["results"]["type"] == "collectra.Results"
+    assert saved["results"]["partition"] == "validation"
+    assert saved["text"]["data"] == "after"
+
+
+def test_a_page_with_the_old_header_opens_with_a_warning_and_is_upgraded_on_save(
+    backend, tmp_path, monkeypatch
+):
+    from collectra.commons import results as header_module
+
+    monkeypatch.setattr(header_module, "_warned", False)
+    path = results_file(
+        tmp_path, "old", {"collectra_results_metadata": {"partition": "train"}}
+    )
+    with pytest.warns(FutureWarning, match="deprecated"):
+        assert backend.load_yaml(str(path))["success"]
+    assert backend._graph.nodes == ["text"]
+    assert backend.update_display_text("text", "after", str(path))["success"]
+    saved = yaml.safe_load(path.read_text())
+    assert list(saved) == ["results", "text"]
+    assert saved["results"]["partition"] == "train"
+    assert "collectra_results_metadata" not in saved

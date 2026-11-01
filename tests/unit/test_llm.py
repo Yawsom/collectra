@@ -145,6 +145,7 @@ def test_replace_inputs():
 def test_invoke():
     mock_self = MagicMock()
     mock_self.is_structured = False
+    mock_self.tools = []
     mock_self.context.usage_file = None
     mock_self.parser.invoke.return_value = "hello"
 

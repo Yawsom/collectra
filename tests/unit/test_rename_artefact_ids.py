@@ -323,3 +323,38 @@ def test_the_renamed_file_loads_with_collectra_and_lineage_intact(tmp_path):
     (word,) = words.items.values()
     assert word.id == "words"
     assert word.parents == ["boxes-2"] and "boxes-2" in boxes.items
+
+
+# --- the results header ---------------------------------------------------------
+
+
+NEW_HEADER = {"type": "collectra.Results", "partition": "p", "timestamp": "t"}
+
+
+def test_the_new_results_header_is_not_renamed_or_counted_as_an_artefact(tmp_path):
+    folder = tmp_path / "p"
+    folder.mkdir()
+    (folder / "results.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "results": NEW_HEADER,
+                "tei": text("tei-3f2a-uuid"),
+                "other": text("other-1", parents=["tei-3f2a-uuid"]),
+            },
+            sort_keys=False,
+        )
+    )
+    renames = script.plan_renames(load(folder))
+    assert {r.node for r in renames} == {"tei", "other"}
+    assert script.process_file(folder / "results.yaml", None, False)[1]
+    data = load(folder)
+    assert list(data) == ["results", "tei", "other"]
+    assert data["results"] == NEW_HEADER
+    assert data["tei"]["id"] == "tei"
+    assert data["other"]["parents"] == ["tei"]
+
+
+def test_a_node_called_results_is_still_renamed(tmp_path):
+    folder = write(tmp_path / "p", {"results": text("results-old-uuid")})
+    script.process_file(folder / "results.yaml", None, False)
+    assert ids(folder, "results") == ["results"]

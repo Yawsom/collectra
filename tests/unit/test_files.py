@@ -131,12 +131,13 @@ class TestCollectraFileModelDump:
         assert "data" not in dumped
 
     def test_metadata_included_with_timestamp(self):
-        """collectra_results_metadata should be included with a fresh timestamp."""
+        """The results header should be written first, with a fresh timestamp."""
         cf = self._make_file({"k": "v"}, partition="train")
         dumped = cf.model_dump()
 
-        assert "collectra_results_metadata" in dumped
-        meta = dumped["collectra_results_metadata"]
+        assert list(dumped)[0] == "results"
+        meta = dumped["results"]
+        assert meta["type"] == "collectra.Results"
         assert "timestamp" in meta
         assert meta["partition"] == "train"
 
@@ -298,7 +299,8 @@ class TestCollectraFileSave:
         assert results_file.exists()
         with open(results_file, "r") as f:
             content = yaml.safe_load(f)
-        assert "collectra_results_metadata" in content
+        assert content["results"]["type"] == "collectra.Results"
+        assert "collectra_results_metadata" not in content
 
     def test_save_preserves_existing_directory_on_asset_error(self, tmp_path):
         """A failed update must not delete an existing Collectra directory."""

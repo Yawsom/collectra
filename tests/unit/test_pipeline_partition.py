@@ -5,6 +5,7 @@ import pytest
 import yaml
 
 from collectra.cli import invoke
+from collectra.commons.results import peek_header
 from collectra.pipelines.base import Pipeline
 
 
@@ -36,9 +37,7 @@ def dataset(tmp_path):
 
 def assignments(parent):
     return {
-        path.parent.name: yaml.safe_load(path.read_text())[
-            "collectra_results_metadata"
-        ]["partition"]
+        path.parent.name: peek_header(yaml.safe_load(path.read_text())).partition
         for path in parent.glob("*.htr/results.yaml")
     }
 

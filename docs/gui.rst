@@ -82,13 +82,13 @@ or a custom icon, use ``--app-dir`` or ``--icon``:
     collectra --pipeline pipeline.yaml install-app results --name "My Pipeline"
     collectra --pipeline pipeline.yaml install-app --name "My Pipeline" --app-dir /Applications --icon custom.icns
 
-By default, the launcher uses ``icon`` from ``collectra_pipeline_metadata``
+By default, the launcher uses ``icon`` from the pipeline entry
 when configured, resolving relative paths from the pipeline directory:
 
 .. code-block:: yaml
 
-    collectra_pipeline_metadata:
-      name: My Pipeline
+    My Pipeline:
+      type: collectra.Pipeline
       ext: collectra
       version: "1.0"
       icon: assets/pipeline.png
@@ -145,13 +145,13 @@ are written to their linked files, preserving the references in ``results.yaml``
 Workflow layouts
 ----------------
 
-List layout YAML files in the pipeline metadata, with paths relative to the
+List layout YAML files in the pipeline entry, with paths relative to the
 pipeline directory:
 
 .. code-block:: yaml
 
-    collectra_pipeline_metadata:
-      name: My Pipeline
+    My Pipeline:
+      type: collectra.Pipeline
       ext: collectra
       version: "1.0"
       layouts:

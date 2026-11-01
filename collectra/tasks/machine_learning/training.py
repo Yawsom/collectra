@@ -13,6 +13,7 @@ from rich.table import Table
 
 from collectra.types.base import ArtefactNode
 from collectra.types.images import Image, ImageCrop
+from collectra.commons.results import peek_header
 from collectra.utils import change_dir
 
 from ...logger import get_logger
@@ -142,8 +143,7 @@ def _file_partition(item_file: Path) -> str:
         return ""
     with open(result_file, "r") as f:
         file_data = yaml.safe_load(f) or {}
-    metadata = file_data.get("collectra_results_metadata") or {}
-    return metadata.get("partition") or ""
+    return peek_header(file_data, source=result_file).partition or ""
 
 
 def _limit_training_files(

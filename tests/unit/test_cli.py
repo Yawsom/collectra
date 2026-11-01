@@ -442,8 +442,8 @@ def test_model_task_class_discovery_does_not_import_backends():
 def test_pipeline_help_with_model_tasks_does_not_import_backends(tmp_path):
     pipeline_file = tmp_path / "pipeline.yaml"
     pipeline_file.write_text(
-        "collectra_pipeline_metadata:\n"
-        "  name: Lazy\n"
+        "Lazy:\n"
+        "  type: collectra.Pipeline\n"
         "  ext: collectra\n"
         "  version: 1.0.0\n"
         "detector:\n"

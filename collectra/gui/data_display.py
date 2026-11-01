@@ -16,6 +16,7 @@ import networkx as nx
 from pydantic import BaseModel, ConfigDict
 
 from collectra.commons.files import CollectraFile, CollectraResultsMetadata
+from collectra.commons.results import pop_header, put_header
 
 from .utils import normalise_items
 
@@ -146,9 +147,7 @@ class CollectraGraph:
     def from_yaml_data(cls, data: dict) -> "CollectraGraph":
         """Build graph from parsed YAML data."""
         data = copy.deepcopy(data)
-        metadata = CollectraResultsMetadata(
-            **data.pop("collectra_results_metadata", {})
-        )
+        metadata = pop_header(data)
         return cls._from_data(data, metadata)
 
     @classmethod
@@ -372,10 +371,7 @@ class CollectraGraph:
 
     def to_yaml_data(self) -> dict:
         """Convert graph back to YAML data structure."""
-        return {
-            "collectra_results_metadata": self.metadata.model_dump(),
-            **self.to_data(),
-        }
+        return put_header(self.metadata, self.to_data())
 
     def to_data(self) -> dict:
         """Convert graph nodes to the data held by a CollectraFile."""

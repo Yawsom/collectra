@@ -40,9 +40,15 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.table import Table
 
+from collectra.commons.results import is_header
 from collectra.utils import write_yaml
 
 METADATA_KEY = "collectra_results_metadata"
+
+
+def _is_header(key: str, value) -> bool:
+    """The file's own header (either form) is not an artefact to rename."""
+    return key == METADATA_KEY or is_header(value)
 
 
 class Rename(BaseModel):
@@ -86,7 +92,7 @@ def plan_renames(data: dict, nodes: list[str] | None = None) -> list[Rename]:
     renames: list[Rename] = []
     final: list[str] = []
     for key, value in data.items():
-        if key == METADATA_KEY:
+        if _is_header(key, value):
             continue
         records = _records(value)
         selected = nodes is None or key in nodes
@@ -103,7 +109,7 @@ def plan_renames(data: dict, nodes: list[str] | None = None) -> list[Rename]:
     old_ids = [
         str(r["id"])
         for k, v in data.items()
-        if k != METADATA_KEY
+        if not _is_header(k, v)
         for r in _records(v)
         if "id" in r
     ]
@@ -135,7 +141,7 @@ def apply_renames(data: dict, renames: list[Rename]) -> None:
     mapping = {r.old: r.new for r in renames if r.old is not None}
     unnamed = {(r.node, r.position): r.new for r in renames if r.old is None}
     for key, value in data.items():
-        if key == METADATA_KEY:
+        if _is_header(key, value):
             continue
         for position, record in enumerate(_records(value), start=1):
             if record.get("id") is None:
